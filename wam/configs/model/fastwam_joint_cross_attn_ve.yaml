@@ -1,0 +1,100 @@
+# NOTE: create_fastwam_joint instantiates FastWAMJoint (NOT FastWAM base).
+# FastWAMJoint._build_mot_attention_mask: action attends to ALL video tokens in self-attn.
+# FastWAM base (do NOT confuse): action only attends to first-frame video tokens.
+_target_: fastwam.runtime.create_fastwam_joint
+model_id: Wan-AI/Wan2.2-TI2V-5B
+tokenizer_model_id: Wan-AI/Wan2.1-T2V-1.3B
+tokenizer_max_len: 512
+load_text_encoder: false
+proprio_dim: ${data.train.processor.proprio_output_dim}
+redirect_common_files: true
+mot_checkpoint_mixed_attn: true
+action_dit_pretrained_path: checkpoints/ActionDiT_linear_interp_Wan22_alphascale_1024hdim.pt
+skip_dit_load_from_pretrain: false
+
+video_dit_config:
+  has_image_input: false
+  patch_size: [1, 2, 2]
+  in_dim: 48
+  hidden_dim: 3072
+  ffn_dim: 14336
+  freq_dim: 256
+  text_dim: 4096
+  out_dim: 48
+  num_heads: 24
+  attn_head_dim: 128
+  num_layers: 30
+  eps: 1.0e-06
+  seperated_timestep: true
+  require_clip_embedding: false
+  require_vae_embedding: false
+  fuse_vae_embedding_in_latents: true
+  use_gradient_checkpointing: ${model.mot_checkpoint_mixed_attn}
+  use_task_video_cross_attn: true
+  video_attention_mask_mode: "first_frame_causal" # default
+  action_conditioned: false
+  action_dim: ${data.train.processor.action_output_dim}
+  action_group_causal_mask_mode: "group_diagonal"
+  attn_gate_mode: "value_headwise"                      # self-attn gate: "none" | "headwise" | "elementwise" | "value_headwise"
+  task_video_cross_attn_gate_mode: "value_headwise"     # task-video cross-attn gate: "none" | "headwise" | "elementwise" | "value_headwise"
+
+action_dit_config:
+  action_dim: ${data.train.processor.action_output_dim}
+  hidden_dim: 1024
+  ffn_dim: 4096
+  num_heads: 24
+  attn_head_dim: 128
+  num_layers: 30
+  text_dim: 4096
+  freq_dim: 256
+  eps: 1.0e-06
+  use_gradient_checkpointing: ${model.mot_checkpoint_mixed_attn}
+  use_task_video_cross_attn: true
+  task_video_ctx_dim: 3072   # video expert hidden_dim; K/V proj for task_video cross-attn
+  attn_gate_mode: "value_headwise"                      # self-attn gate: "none" | "headwise" | "elementwise" | "value_headwise"
+  task_video_cross_attn_gate_mode: "value_headwise"     # task-video cross-attn gate: "none" | "headwise" | "elementwise" | "value_headwise"
+
+video_scheduler:
+  train_shift: 5.0
+  infer_shift: 5.0
+  num_train_timesteps: 1000
+
+action_scheduler:
+  train_shift: 5.0
+  infer_shift: 5.0
+  num_train_timesteps: 1000
+
+loss:
+  lambda_action: 10.0
+  lambda_progress: 1.0
+
+task_video_conditioning_mode: "prepend_cross_attn"
+log_cross_attn_weights: true
+action_prediction_type: "sample"         # "velocity" (flow matching) | "sample" (x₀ prediction)
+video_prediction_type: "velocity"        # "velocity" (flow matching) | "sample" (x₀ prediction)
+progress_prediction_type: "sample"     # "velocity" (flow matching) | "sample" (x₀ prediction)
+noise_to_progress_token: false            # false → clean GT progress as conditioning, skip flow-matching loss
+use_noisy_progress_group: true           # true → isolated noisy group for progress denoising (two-stage inference)
+num_inference_steps_progress: 10          # Stage 1 denoising steps (only used when use_noisy_progress_group=true)
+noise_clean_progress_token: true         # true → add bounded Gaussian noise to clean progress token for robustness (requires use_noisy_progress_group=true)
+noise_clean_progress_prob: 0.5            # probability of adding noise per forward pass
+noise_clean_progress_scale: 0.5           # Gaussian std for clean progress noise
+action_self_attn_to_task_video: true      # allow action → task_video in MoT mixed self-attention
+
+progress_scheduler:
+  num_train_timesteps: 1000
+  train_shift: 3.0
+  infer_shift: 3.0
+
+# --- Trainable visual encoder (DINO+SigLIP fused first-frame conditioning) ---
+visual_encoder:
+  enabled: true
+  backbone_name: dinosiglip_vitb14_so400m   # fused: DINOv2-B/14 (768-d) + SigLIP-SO400M/14 (1152-d) → 1920-d
+  num_cameras: 2
+  camera_input_size: 224
+  proj_hidden: 4096                          # 3-layer FusedMLP: 1920 → 7680 → 4096 → 4096
+  dropout: 0.0
+  lr_scale: 10.0
+  backbone_local_repo: /x2robot_v2/ethanchen/open_ckpts/dinov2_repo
+  backbone_weights_path: /x2robot_v2/ethanchen/open_ckpts/dinov2_vitb14/dinov2_vitb14_pretrain.pth
+  siglip_local_weights_path: /x2robot_v2/ethanchen/open_ckpts/siglip_so400m_patch14_224/model.safetensors

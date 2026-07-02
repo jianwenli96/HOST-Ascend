@@ -1,0 +1,46 @@
+# @package _global_
+
+defaults:
+  - override /data: custom_cross_all
+  - override /model: fastwam_joint_cross_attn_ve
+  - _self_
+
+# dataloading
+batch_size: 2
+num_workers: 10
+
+model:
+  mot_checkpoint_mixed_attn: false
+  task_video_conditioning_mode: "prepend_cross_attn"
+  noise_clean_progress_token: true
+  video_dit_config:
+    attn_gate_mode: "headwise"
+    task_video_cross_attn_gate_mode: "headwise"
+  action_dit_config:
+    attn_gate_mode: "headwise"
+    task_video_cross_attn_gate_mode: "headwise"
+
+# scheduler
+lr_scheduler_type: "cosine"
+min_lr_ratio: 0.1
+learning_rate: 1e-5
+num_epochs: 9999
+max_steps: 1500000
+log_every: 10
+save_every: 50000
+eval_every: 1000
+
+# training
+gradient_accumulation_steps: 1
+weight_decay: 1e-2
+resume: null
+
+# Staged unfreeze for action representation transfer (absolute → relative).
+# Stage 1 [0, stage2_step):  action I/O layers only (encoder, head, embeddings).
+# Stage 2 [stage2_step, stage3_step):  full action expert.
+# Stage 3 [stage3_step, ∞):  all parameters (normal training).
+# Set enabled: false to disable and use standard full-parameter training.
+staged_unfreeze:
+  enabled: false
+  stage2_step: 0
+  stage3_step: 0

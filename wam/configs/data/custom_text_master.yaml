@@ -1,0 +1,160 @@
+train:
+  _target_: fastwam.datasets.custom.mydatasets.build_custom_dataset
+
+  # Data source
+  data_path: "/open_data/cgy/processed_data/video_paths_basket/clean/10042_video_paths.json"
+  exclude_episode_json: "/open_data/cgy/processed_data/video_paths_basket/clean/desk_stack_cup_on_table/10042_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/place_tissue_on_tray/10042_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/put_color_pencil_into_pen_holder_on_table/10042_video_paths.json"
+
+  # Frame sampling
+  frames: 2                         # T=2 (lagged mode: start + end keyframe)
+  action_frames: 15                 # default action interval per keyframe step
+  random_frame_sampling: true
+  raw_image: true
+
+  # Action
+  actions: true
+  joints: true
+  use_6d_rotation: true             # Euler -> 6D rotation (action_dim=20 for dual-arm)
+  use_relative_action: false
+  skip_no_action: true
+
+  # Static frame removal
+  remove_static_frames: true
+  static_rot_threshold: 0.01        # radians
+  static_trans_threshold: 0.01      # metres
+  static_gripper_threshold: 0.01
+
+  # Indicator (not yet supported in FastWAM)
+  use_indicator_prompt: false
+  use_indicator_positive: false
+
+  # View selection
+  num_view_probs: '{"2": 1.0}'     # 2-view only
+  cam_mapping_dir: "/open_data/cgy/cam_mapping/2views"
+  joint_action_mapping_dir: "/open_data/cgy/joint_action_mapping/master"
+
+  # Image resize (single-view pixel count for smart_resize)
+  agent_image_pixels: 50176         # 224*224
+  task_video_pixels: 50176          # 224*224
+
+  # Drop probabilities (batch-level, synced to model side)
+  task_video_drop_prob: 1.0         # prob to drop task video for entire batch
+  task_text_drop_prob: 0.0          # prob to drop text prompt for entire batch
+
+  # Data augmentation
+  use_augmentation: true
+  datasets_weight: false            # uniform sampling
+
+  # Placeholder for model config interpolation (not used by custom dataset)
+  processor:
+    action_output_dim: 22   # dual-arm action dim (6D rotation: (3+6+1)*2 = 20)
+    proprio_output_dim: 14   # dual-arm joint state dim
+
+  # FastWAM video params
+  action_video_freq_ratio: 8        # video downsample ratio
+  max_action_len: 32                # must be divisible by (T_video-1); T_video=9 -> 8*4=32
+  context_len: 512                  # T5 text embedding length
+
+  # Task video peer selection file name
+  task_paths_filename: "task_paths.json"
+
+  # Sampling interval multipliers for random action frame spacing
+  sampling_interval_min_mult: 0.5
+  sampling_interval_max_mult: 2.0
+
+  # Task video max keyframes per num_views
+  task_max_frames:
+    1: [8, 10]
+    2: [6, 6]
+    3: [4, 4]
+
+  # Per-dataset FPS (resamples raw episodes to uniform frame rate)
+  dataset_fps:
+    '1x': 10
+    rt1: 5
+    berkeley_autolab_ur5: 5
+    bridgev2: 5
+    SSv2: 5
+    calvin: 10
+    cmu_play_fusion: 10
+    fmb: 10
+    language_table: 10
+    libero: 10
+    maniskill: 10
+    droid: 15
+    robocoin: 15
+    taco_play: 15
+    toto: 15
+    utaustin_mutex: 15
+    viola: 15
+    AgiBotWorld-Beta-v2: 24
+    bridge_data_v2_img1_v2: 3
+    bridge_data_v2_img3_v2: 3
+    bridge_data_v2_img4_v2: 3
+    droid_success_only_v2: 15
+    fractal20220817_data_v2: 5
+    Robochallenge_x2: 15
+    robocoin_v2: 15
+    robomindv2: 15
+    robomind_v2.0_v2: 15
+    robomind: 15
+    '10042': 32
+    '10053': 32
+    '10058': 32
+
+val:
+  _target_: fastwam.datasets.custom.mydatasets.build_custom_dataset
+
+  # Data source — override at launch:  data.val.data_path=/path/to/val.json
+  data_path: ${data.train.data_path}
+  exclude_episode_json: null
+
+  # Frame sampling — deterministic for val
+  frames: ${data.train.frames}
+  action_frames: ${data.train.action_frames}
+  random_frame_sampling: false
+  raw_image: true
+
+  # Action
+  actions: true
+  joints: true
+  use_6d_rotation: ${data.train.use_6d_rotation}
+  use_relative_action: ${data.train.use_relative_action}
+  skip_no_action: true
+
+  # Static frame removal
+  remove_static_frames: ${data.train.remove_static_frames}
+  static_rot_threshold: ${data.train.static_rot_threshold}
+  static_trans_threshold: ${data.train.static_trans_threshold}
+  static_gripper_threshold: ${data.train.static_gripper_threshold}
+
+  use_indicator_prompt: false
+  use_indicator_positive: false
+
+  num_view_probs: ${data.train.num_view_probs}
+  cam_mapping_dir: ${data.train.cam_mapping_dir}
+  joint_action_mapping_dir: ${data.train.joint_action_mapping_dir}
+
+  agent_image_pixels: ${data.train.agent_image_pixels}
+  task_video_pixels: ${data.train.task_video_pixels}
+
+  # Val: never drop task_video or text
+  task_video_drop_prob: ${data.train.task_video_drop_prob}
+  task_text_drop_prob: ${data.train.task_text_drop_prob}
+
+  # No augmentation for val
+  use_augmentation: false
+  datasets_weight: false
+
+  processor:
+    action_output_dim: ${data.train.processor.action_output_dim}
+    proprio_output_dim: ${data.train.processor.proprio_output_dim}
+
+  action_video_freq_ratio: ${data.train.action_video_freq_ratio}
+  max_action_len: ${data.train.max_action_len}
+  context_len: ${data.train.context_len}
+  dataset_fps: ${data.train.dataset_fps}
+  task_max_frames: ${data.train.task_max_frames}
+  task_paths_filename: ${data.train.task_paths_filename}
+  sampling_interval_min_mult: ${data.train.sampling_interval_min_mult}
+  sampling_interval_max_mult: ${data.train.sampling_interval_max_mult}

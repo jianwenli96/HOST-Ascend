@@ -1,0 +1,38 @@
+# ── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.ipynb_checkpoints/
+
+# ── Environments ─────────────────────────────────────────────────────────
+.venv/
+venv/
+.env
+
+# ── Experiment outputs / logs / checkpoints (never commit) ───────────────
+logs/
+logs_eval/
+train_sync/
+sync/
+wandb/
+*.log
+*.pt
+*.pth
+*.bin
+*.safetensors
+checkpoints/
+
+# ── Secrets ──────────────────────────────────────────────────────────────
+# Never commit API keys; set WANDB_API_KEY via the environment instead.
+*.key
+.wandb
+
+# ── Editor / OS ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+.cursorignore
+.cursor_test_write
