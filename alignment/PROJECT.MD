@@ -120,7 +120,6 @@ Since TCC loss requires comparing full temporal sequences, we perform **Embeddin
 
 ### 6.3. Observability & Visualization
 - **GIF Reconstruction**: `utils.py` recognizes `merged_metadata` in the loss output. When a high-loss sample is logged, it uses the merged paths to generate a GIF representing the **full long video** (e.g., all 96 frames) instead of a single 24-frame chunk.
-- **Visual Cues**: `visualize_high_loss.py` labels these results with `[M=x]` and `[C=merged]` to indicate reconstruction.
 
 ## 7. Temporal Reversal Augmentation
 
@@ -166,7 +165,7 @@ The alignment loss (`Main -> Ref`) uses a specialized dual-softmax approach:
     - **Per-Sample Weighting**: Cycle consistency loss is scaled by `(1 - P(Dustbin))`, down-weighting alignment for frames the model deems "garbage".
     - **Global Penalty**: A batch-level penalty (`GLOBAL_DUSTBIN_LOSS_WEIGHT`) ensures the total mass of `P(Dustbin)` roughly matches the known cut ratio of the batch, within a tolerance (`GLOBAL_DUSTBIN_LOSS_TOLERANCE`).
 
-### 8.3. Visual Debugging (`visualize_high_loss.py`)
+### 8.3. Visual Debugging
 To verify the mechanism works:
 - **Mask Propagation**: `utils.py` extracts `is_cut_mask` from the loss dictionary and saves it into `high_loss_samples.jsonl`.
-- **Visualization**: The GIF generator now renders a **Red Border** around frames in the reference sequence that are marked as "cut". It also appends `[CUT]` to the frame title, allowing visual confirmation that the model correctly assigns "Cut" frames to the Dustbin (or heavily penalizes mis-alignment).
+- **Visualization**: A GIF generator can render a **Red Border** around frames in the reference sequence that are marked as "cut", appending `[CUT]` to the frame title, to visually confirm the model correctly assigns "Cut" frames to the Dustbin (or heavily penalizes mis-alignment).

@@ -2430,8 +2430,6 @@ def get_transforms(mode='train'):
     transforms_list.append(transforms.ToTensor())
     
     # Normalize (Mean 0.5, Std 0.5 -> Map [0, 1] to [-1, 1])
-    # TF code: (x - 0) / (255 - 0) * (1 - 0) + 0 -> [0, 1]
-    # Then preprocess_sequence.NORMALIZE_MEAN_STDDEV: mean=0.5, std=0.5
     transforms_list.append(transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]))
     
     return transforms.Compose(transforms_list)

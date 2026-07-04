@@ -1,6 +1,0 @@
-# DeepSpeed Hostfile
-# Format: <hostname or ip> slots=<number of GPUs>
-# Example:
-# worker-1 slots=8
-# worker-2 slots=8
-# localhost slots=4
