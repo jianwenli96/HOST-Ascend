@@ -45,6 +45,12 @@ LOCAL_LOGS="./logs"
 
 # Set your own key in the environment before launching: export WANDB_API_KEY=...
 export WANDB_API_KEY="${WANDB_API_KEY:-}"
+# If no wandb key is available (e.g. a fresh open-source checkout), fall back to
+# offline logging rather than crashing at wandb.init()'s interactive login prompt.
+if [ -z "${WANDB_API_KEY}" ]; then
+    echo "[wandb] WARNING: WANDB_API_KEY is empty -> exporting WANDB_MODE=offline (local logging only). Set WANDB_API_KEY to enable cloud sync." >&2
+    export WANDB_MODE="${WANDB_MODE:-offline}"
+fi
 BASE_PROJECT_NAME="tcc_qwen_alignment_10042"
 
 # Synchronization logic for timestamp

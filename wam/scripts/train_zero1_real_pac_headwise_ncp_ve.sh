@@ -124,6 +124,12 @@ echo "[launch] ngpus=${NGPUS} world_size=${WORLD_SIZE} rank=${RANK} total_proces
 export WANDB_PROJECT="FAST-WAM"
 # Set your own key in the environment before launching: export WANDB_API_KEY=...
 export WANDB_API_KEY="${WANDB_API_KEY:-}"
+# If no wandb key is available (e.g. a fresh open-source checkout), fall back to
+# offline logging rather than crashing at wandb.init()'s interactive login prompt.
+if [ -z "${WANDB_API_KEY}" ]; then
+    echo "[wandb] WARNING: WANDB_API_KEY is empty -> exporting WANDB_MODE=offline (local logging only). Set WANDB_API_KEY to enable cloud sync." >&2
+    export WANDB_MODE="${WANDB_MODE:-offline}"
+fi
 # Only the global master node (RANK=0) logs to wandb; all other nodes are disabled
 # to prevent duplicate runs when each DLC node launches its own accelerate process.
 if [ "${RANK:-0}" -ne 0 ]; then

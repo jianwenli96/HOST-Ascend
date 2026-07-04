@@ -277,12 +277,25 @@ class Wan22Trainer:
                 "wandb logging is enabled in config (`wandb.enabled=true`) but wandb is not installed."
             ) from e
 
+        # WANDB_MODE (set by the launch script, e.g. to fall back to offline logging
+        # when no WANDB_API_KEY is configured) must take precedence over the static
+        # Hydra default `wandb.mode: online` — otherwise an explicit `mode=` kwarg
+        # here would silently shadow the env var and wandb.init() would still try
+        # an interactive login.
+        env_wandb_mode = os.environ.get("WANDB_MODE")
+        if env_wandb_mode is not None and env_wandb_mode != self.cfg.wandb.mode:
+            logger.warning(
+                "WANDB_MODE=%s in the environment overrides cfg.wandb.mode=%s",
+                env_wandb_mode, self.cfg.wandb.mode,
+            )
+        wandb_mode = env_wandb_mode if env_wandb_mode is not None else self.cfg.wandb.mode
+
         self.wandb_run = wandb.init(
             entity=self.cfg.wandb.workspace,
             project=self.cfg.wandb.project,
             name=self.cfg.wandb.name,
             group=None if self.cfg.wandb.group in (None, "null", "") else str(self.cfg.wandb.group),
-            mode=self.cfg.wandb.mode,
+            mode=wandb_mode,
             dir=self.output_dir,
         )
         logger.info(
