@@ -334,6 +334,9 @@ CONFIG.DATA.SEGMENTED_PATH_DATASETS = ('AgiBotWorld','AgiBotWorld-Beta-v2','robo
 # Path transformations for task_paths.json loading
 # Format: {dataset_name: {old_prefix: new_prefix, ...}, ...}
 # The dataset_name is extracted from the JSON filename (e.g., AgiBotWorld_video_paths.json -> 'AgiBotWorld')
+# TODO(open-source): every prefix below is an internal-cluster path (including the
+# "10042" entry, which is load-bearing for the verified alignment training run —
+# do not remove without re-verifying end-to-end). See OPEN_SOURCE_PATH_TODOS.md.
 CONFIG.DATA.TASK_PATHS_TRANSFORMS = {
     'AgiBotWorld-Beta-v2': {
         '/open_data/Open_Action_datasets_as_mp4': '/open_data/cgy/anns'

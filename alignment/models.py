@@ -27,6 +27,10 @@ class BaseModel(nn.Module):
         
         if network in ['Resnet50', 'Resnet50_pretrained']:
             print('Loading ResNet50 model...')
+            # TODO(open-source): internal-cluster path; not load-bearing for the
+            # verified training run (NETWORK=Qwen3-VL-2B doesn't reach this branch),
+            # and already falls back to a public download below. Low priority.
+            # See OPEN_SOURCE_PATH_TODOS.md.
             # Load pretrained ResNet50
             resnet = models.resnet50(pretrained=False)
             resnet_ckpt_path = '/x2robot_v2/ethanchen/open_ckpts/resnet/resnet50-0676ba61.pth'
@@ -62,7 +66,11 @@ class BaseModel(nn.Module):
             
         elif network == 'dinov2_vitb14':
             print("Loading DINOv2 Base model...")
-            
+            # TODO(open-source): internal-cluster paths below; not load-bearing for
+            # the verified training run (NETWORK=Qwen3-VL-2B doesn't reach this
+            # branch), and already falls back to a public download further down.
+            # Low priority. See OPEN_SOURCE_PATH_TODOS.md.
+
             # Use local source for DINOv2 to avoid network issues
             repo_dir = '/x2robot_v2/ethanchen/code/dinov2_source'
             if not os.path.exists(repo_dir):
@@ -103,7 +111,11 @@ class BaseModel(nn.Module):
 
         elif network == 'dinov2_vitl14':
             print("Loading DINOv2 Large model...")
-            
+            # TODO(open-source): internal-cluster paths below; not load-bearing for
+            # the verified training run (NETWORK=Qwen3-VL-2B doesn't reach this
+            # branch), and already falls back to a public download further down.
+            # Low priority. See OPEN_SOURCE_PATH_TODOS.md.
+
             # Use local source for DINOv2 to avoid network issues
             repo_dir = '/x2robot_v2/ethanchen/code/dinov2_source'
             if not os.path.exists(repo_dir):
@@ -144,6 +156,11 @@ class BaseModel(nn.Module):
 
         elif 'Qwen3-VL' in network:
             print(f"Loading {network}...")
+            # TODO(open-source): internal-cluster path, load-bearing for the
+            # verified training run — do not remove without re-verifying end-to-end.
+            # Planned fix: env var override defaulting to this path, falling back to
+            # the public HF repo https://huggingface.co/Qwen/Qwen3-VL-Embedding-8B
+            # if neither is present. See OPEN_SOURCE_PATH_TODOS.md.
             model_path = '/mnt/data/checkpoint/ethanchen/Qwen3/Qwen3-VL-Embedding-8B'
             if not os.path.exists(model_path):
                 raise FileNotFoundError(f"Model not found at {model_path}")

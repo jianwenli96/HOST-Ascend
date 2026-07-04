@@ -5,6 +5,10 @@ Supports prefix-based path remapping for different datasets to handle
 data migration or reorganization scenarios.
 
 Example: '/open_data' -> '/open_data/cgy'
+
+TODO(open-source): every prefix below is an internal-cluster path (including the
+"10042" entry, which is load-bearing for the verified alignment/WAM training run —
+do not remove without re-verifying end-to-end). See OPEN_SOURCE_PATH_TODOS.md.
 """
 
 # Path transformations by dataset name

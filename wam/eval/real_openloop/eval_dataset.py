@@ -49,6 +49,9 @@ class FastWAMEvalDataset(Emu3SFTDataset):
         dataset_image_size: Optional[dict] = None,
         context_len: int = 128,
         action_downsample_factor: Optional[dict] = None,
+        # TODO(open-source): internal-cluster path default; only exercised by
+        # real-robot open-loop eval, not the verified training run. See
+        # OPEN_SOURCE_PATH_TODOS.md.
         cam_mapping_dir: str = "/open_data/cgy/cam_mapping/2views",
         dataset_fps: Optional[dict] = None,
         task_max_frames: Optional[dict] = None,

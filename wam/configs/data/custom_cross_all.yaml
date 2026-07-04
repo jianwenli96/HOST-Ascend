@@ -1,6 +1,9 @@
 train:
   _target_: fastwam.datasets.custom.mydatasets.build_custom_dataset
 
+  # TODO(open-source): data_path/cam_mapping_dir/joint_action_mapping_dir below are
+  # internal-cluster paths, load-bearing for the verified training run — do not
+  # remove without re-verifying end-to-end. See OPEN_SOURCE_PATH_TODOS.md.
   # Data source
   data_path: "/open_data/cgy/processed_data/video_paths_basket/clean/filtered_video_paths/10034_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/filtered_video_paths/10035_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/filtered_video_paths/10040_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/filtered_video_paths/10042_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/filtered_video_paths/10043_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/filtered_video_paths/10053_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/filtered_video_paths/10058_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/filtered_video_paths/10069_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/filtered_video_paths/10070_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/filtered_video_paths/10072_video_paths.json"
   exclude_episode_json: null

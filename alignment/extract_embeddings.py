@@ -44,6 +44,9 @@ def extract_embeddings(args):
     if 'Qwen' in CONFIG.MODEL.BASE_MODEL.NETWORK:
         try:
             # Use local path for Qwen3-VL-2B
+            # TODO(open-source): internal-cluster path; utility script, not exercised
+            # by the verified training run. Same planned fix as models.py/train.py.
+            # See OPEN_SOURCE_PATH_TODOS.md.
             model_name = '/mnt/data/checkpoint/ethanchen/Qwen3/Qwen3-VL-Embedding-8B'
             print(f"Loading processor for {model_name}")
             processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)

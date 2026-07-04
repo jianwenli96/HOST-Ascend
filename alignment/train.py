@@ -244,6 +244,9 @@ def train(argv):
   if 'Qwen' in CONFIG.MODEL.BASE_MODEL.NETWORK:
       try:
           # Use local path for Qwen3-VL-2B
+          # TODO(open-source): internal-cluster path, load-bearing for the verified
+          # training run — do not remove without re-verifying end-to-end. Same fix as
+          # models.py (env var + public HF fallback). See OPEN_SOURCE_PATH_TODOS.md.
           model_name = '/mnt/data/checkpoint/ethanchen/Qwen3/Qwen3-VL-Embedding-8B'
           if is_master:
               logging.info(f"Loading processor for {model_name}")

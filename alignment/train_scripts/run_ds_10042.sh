@@ -98,13 +98,7 @@ VIDEO_PATHS="/open_data/cgy/processed_data/video_paths_basket/clean/10042_video_
 # VIDEO_PATHS="/open_data/cgy/processed_data/video_paths_basket/clean/rt1_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/fmb_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/SSv2_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/bridgev2_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/calvin_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/libero_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/maniskill_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/droid_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/robocoin_video_paths.json"
 # VIDEO_PATHS="/open_data/cgy/processed_data/video_paths_basket/libero_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/berkeley_autolab_ur5_video_paths.json"
 DS_CONFIG="scripts/ds_config_zero3.json"
-# RESUME_DIR="/mnt/data/checkpoint/ethanchen/code/tcc_py_Qwen3_video/logs/tcc_qwen_alignment_20260107_155137" 
-# RESUME_DIR="/x2robot_v2/ethanchen/code/tcc_py_Qwen3_video_fast_3_3_aug_high_reverse_causal_2/logs/tcc_qwen_alignment_20260115_232104" 
-# RESUME_DIR="/x2robot_v2/ethanchen/code/tcc_py_Qwen3_video_fast_3_3_aug_high_reverse_causal_dustbin_eval_var_attn_pool_2_e_3_vid_2/logs/tcc_qwen_alignment_20260129_204418" 
-# RESUME_DIR="/x2robot_v2/ethanchen/code/tcc_py_Qwen3_video_fast_3_3_aug_high_reverse_causal_dustbin_eval_var_attn_pool_2_e_3_vid_2_large_2_mp4_dtw_2_1_easy_no_attn_EMA_R_test/logs/tcc_qwen_alignment_20260221_212251"
-# RESUME_DIR="/x2robot_v2/ethanchen/code/tcc_py_Qwen3_video_fast_3_3_aug_high_reverse_causal_dustbin_eval_var_attn_pool_2_e_3_vid_2_large_2_mp4_dtw_2_1_all_no_attn_EMA_R_test_agi_cut_filter/logs/tcc_qwen_alignment_20260305_224554"
-# RESUME_DIR="/x2robot_v2/ethanchen/code/tcc_py_Qwen3_video_fast_3_3_aug_high_reverse_causal_dustbin_eval_var_attn_pool_2_e_3_vid_2_large_2_mp4_dtw_2_1_all_no_attn_R_test_agi_cut_filter_eval_bk_align_diff/logs/tcc_qwen_alignment_RoboChallenge_20260316_215350"
-# RESUME_DIR="/x2robot_v2/ethanchen/code/Video_alignment_SmoothDTW_3view_no_his/logs/tcc_all_qwen_alignment_20260405_105444"
+# To resume from a previous run, set: RESUME_DIR="/path/to/previous/run/logs/tcc_qwen_alignment_<timestamp>"
 
 # Calculate Gradient Accumulation Steps
 # Target: 4 / WORLD_SIZE (Nodes)

@@ -46,12 +46,11 @@ RANK=${RANK:-0}
 
 # Define default arguments
 NETWORK="Qwen3-VL-2B"
-# Default evaluation dataset paths (can be overridden)
-# VIDEO_PATHS="/open_data/tcc/libero_10_version_1_pi0/video_paths.json"
-VIDEO_PATHS="/x2robot_v2/ethanchen/code/tcc_py_Qwen3_video_c_bi/rollout_pickle/rollout_step_0.pkl"
+# Evaluation dataset path — pass your own via --video_paths
+VIDEO_PATHS=""
 
-# Checkpoint directory to evaluate (REQUIRED)
-RESUME_DIR="/x2robot_v2/ethanchen/code/tcc_py_Qwen3_video_fast_3_3_aug_high_reverse_causal_dustbin_eval_var_attn_pool_2_e_2/logs/tcc_qwen_alignment_20260122_145004"
+# Checkpoint directory to evaluate — required, pass via --resume_dir
+RESUME_DIR=""
 
 # Evaluation parameters
 BATCH_SIZE=1  # Must be divisible by 4 for multiplier=4
@@ -96,6 +95,13 @@ fi
 
 if [ ! -d "$RESUME_DIR" ]; then
     echo "Error: Checkpoint directory $RESUME_DIR does not exist."
+    exit 1
+fi
+
+# Check if VIDEO_PATHS is provided
+if [ -z "$VIDEO_PATHS" ]; then
+    echo "Error: --video_paths must be specified for evaluation."
+    echo "Usage: $0 --resume_dir /path/to/checkpoint --video_paths /path/to/video_paths.json [--batch_size 4] [--eval_chunk_probs 0,0,1]"
     exit 1
 fi
 

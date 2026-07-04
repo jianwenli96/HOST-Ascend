@@ -95,6 +95,8 @@ visual_encoder:
   proj_hidden: 4096                          # 3-layer FusedMLP: 1920 → 7680 → 4096 → 4096
   dropout: 0.0
   lr_scale: 10.0
+  # TODO(open-source): internal-cluster paths, load-bearing for the verified training
+  # run — do not remove without re-verifying end-to-end. See OPEN_SOURCE_PATH_TODOS.md.
   backbone_local_repo: /x2robot_v2/ethanchen/open_ckpts/dinov2_repo
   backbone_weights_path: /x2robot_v2/ethanchen/open_ckpts/dinov2_vitb14/dinov2_vitb14_pretrain.pth
   siglip_local_weights_path: /x2robot_v2/ethanchen/open_ckpts/siglip_so400m_patch14_224/model.safetensors
