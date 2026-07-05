@@ -285,22 +285,10 @@ def log_and_save_high_loss_samples(logdir, step, loss_dict, data, save_all=False
                 "chunk_id": "merged",
             }
             
-            if 'dustbin_loss_per_sample' in loss_dict:
-                 d_loss_vec = loss_dict['dustbin_loss_per_sample']
-                 # Using index i because d_loss_vec corresponds to unique groups
-                 if i < d_loss_vec.size(0):
-                     g_entry['dustbin_loss'] = d_loss_vec[i].float().item()
-
             if 'dtw_guidance_loss_per_sample' in loss_dict:
                 dtw_ps_vec = loss_dict['dtw_guidance_loss_per_sample']
                 if i < dtw_ps_vec.size(0):
                     g_entry['dtw_loss'] = dtw_ps_vec[i].float().item()
-
-            if 'is_cut_mask' in loss_dict:
-                 cut_masks = loss_dict['is_cut_mask']
-                 if i < cut_masks.size(0):
-                     # Mask for this sample
-                     g_entry['is_cut_mask'] = cut_masks[i].cpu().tolist()
 
             group_data.append(g_entry)
         
@@ -331,11 +319,6 @@ def log_and_save_high_loss_samples(logdir, step, loss_dict, data, save_all=False
                 "chunk_id": data.get('chunk_id', [0] * (2*batch_size_val))[i] if isinstance(data.get('chunk_id'), list) else 0,
             }
             
-            if 'dustbin_loss_per_sample' in loss_dict:
-                 d_loss_vec = loss_dict['dustbin_loss_per_sample']
-                 if i < d_loss_vec.size(0):
-                     g_entry['dustbin_loss'] = d_loss_vec[i].item()
-
             if 'dtw_guidance_loss_per_sample' in loss_dict:
                 dtw_ps_vec = loss_dict['dtw_guidance_loss_per_sample']
                 if i < dtw_ps_vec.size(0):
@@ -442,14 +425,8 @@ def log_and_save_high_loss_samples(logdir, step, loss_dict, data, save_all=False
                         "multiplier": g_info.get("multiplier", 1),
                     }
                     
-                    if 'dustbin_loss' in g_info:
-                        record['dustbin_loss'] = g_info['dustbin_loss']
-
                     if 'dtw_loss' in g_info:
                         record['dtw_loss'] = g_info['dtw_loss']
-
-                    if 'is_cut_mask' in g_info:
-                        record['is_cut_mask'] = g_info['is_cut_mask']
 
                     # Save alignment indices
                     if 'forward_alignment_indices' in loss_dict:
@@ -485,11 +462,6 @@ def log_and_save_high_loss_samples(logdir, step, loss_dict, data, save_all=False
                     if 'backward_dtw_indices' in loss_dict and loss_dict['backward_dtw_indices'] is not None:
                         bwd_dtw_idx = loss_dict['backward_dtw_indices'][idx].cpu().tolist()
                         record["backward_dtw_indices"] = bwd_dtw_idx
-                    
-                    # Save real softmax alignment (dustbin excluded)
-                    if 'forward_alignment_indices_real' in loss_dict:
-                        fwd_align_idx_real = loss_dict['forward_alignment_indices_real'][idx].cpu().tolist()
-                        record["forward_alignment_indices_real"] = fwd_align_idx_real
                     
                     # Save top-5 alignment candidates and their probabilities
                     # Forward top-5: Main -> Ref (top 5 ref frames for each main frame)

@@ -14,8 +14,6 @@ class Alignment(Algorithm):
     
     raw_tokens = None
     gates = None
-    is_cut_masks = None
-    has_dustbin = None
     merged_meta = None
     if isinstance(embs, dict):
         if 'gates' in embs:
@@ -24,10 +22,6 @@ class Alignment(Algorithm):
             steps = embs['steps']
         if 'seq_lens' in embs:
             seq_lens = embs['seq_lens']
-        if 'is_cut_masks' in embs:
-            is_cut_masks = embs['is_cut_masks']
-        if 'has_dustbin' in embs:
-            has_dustbin = embs['has_dustbin']
         merged_meta = embs.get('merged_metadata')
         raw_tokens = embs.get('raw_tokens')
         embs = embs['embs']
@@ -65,8 +59,6 @@ class Alignment(Algorithm):
         raw_tokens=raw_tokens,
         gate_module=self.model.get('gate'),
         precomputed_gates=gates,
-        is_cut_mask=is_cut_masks,
-        has_dustbin=has_dustbin,
         global_step=global_step,
         training=training)
 

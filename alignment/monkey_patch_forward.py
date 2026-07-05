@@ -175,23 +175,17 @@ def qwen3_vl_moe_mixed_modality_forward(
     )
 
 
-def _apply_group_attention_mask(attention_mask, input_ids, inputs_embeds, group_starts, batch_idx=0, isolate_first_group=False):
+def _apply_group_attention_mask(attention_mask, input_ids, inputs_embeds, group_starts, batch_idx=0):
     # Function assumes attention_mask is already 4D: (B, 1, S, S)
     # Modifies attention_mask in-place for sample batch_idx
-    
+
     min_dtype = torch.finfo(inputs_embeds.dtype).min
     start_0 = group_starts[0]
     num_groups = len(group_starts) - 1
-    
+
     # Prevent prefix from attending to any chunk (prefix should be context-only)
     content_end = group_starts[-1]
     attention_mask[batch_idx, :, 0:start_0, start_0:content_end] = min_dtype
-
-    # Isolate First Group (Dustbin) from Prefix
-    if isolate_first_group and num_groups > 0:
-        end_0 = group_starts[1]
-        # Block Group 0 from attending to Prefix (0:start_0)
-        attention_mask[batch_idx, :, start_0:end_0, 0:start_0] = min_dtype
 
     for k in range(num_groups):
         start_k = group_starts[k]
@@ -474,16 +468,9 @@ def qwen3_vl_mixed_modality_forward(
             
             # 6. Apply attention_mask and position_ids modifications
             if attention_mask is not None:
-                isolate = False
-                if 'num_refs' in kwargs and 'has_dustbin' in kwargs:
-                    n_r = kwargs['num_refs'][b]
-                    h_d = kwargs['has_dustbin'][b]
-                    if n_r > 0 and h_d:
-                        isolate = True
-                
                 attention_mask = _apply_group_attention_mask(
-                    attention_mask, input_ids, inputs_embeds, group_starts, 
-                    batch_idx=b, isolate_first_group=isolate
+                    attention_mask, input_ids, inputs_embeds, group_starts,
+                    batch_idx=b
                 )
             
             if position_ids is not None:

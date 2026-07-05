@@ -276,10 +276,6 @@ class AlignmentCollator:
         # Phase 3: Assemble results in original order.
         imgs = []
         for idx, p in enumerate(paths):
-            if isinstance(p, str) and p == "DUSTBIN":
-                imgs.append(Image.new('RGB', (CONFIG.IMAGE_SIZE, CONFIG.IMAGE_SIZE), (0, 0, 0)))
-                continue
-
             img = None
             if isinstance(p, str) and p.startswith("video://"):
                 # Retrieve from pre-loaded batch
@@ -405,22 +401,8 @@ class AlignmentCollator:
                 S = len(main_paths_all) // c_size
             indices = np.linspace(0, S - 1, M * chunk_len, dtype=int)
 
-            # Pre-compute consistent cut params for all chunks from this video
-            consistent_cut_params = None
-            if self.mode == 'train':
-                align_paths_for_cut = orig_data.get('align_frame_paths', [])
-                if align_paths_for_cut:
-                    cut_pct = random.uniform(CONFIG.TRAIN.CUT_RANGE[0], CONFIG.TRAIN.CUT_RANGE[1])
-                    cut_len = int(len(align_paths_for_cut) * cut_pct)
-                    if cut_len > 0:
-                        max_start = len(align_paths_for_cut) - cut_len
-                        si = random.randint(0, max_start)
-                        consistent_cut_params = (si, si + cut_len)
-
             for m in range(M):
                 chunk_data = orig_data.copy()
-                if consistent_cut_params:
-                    chunk_data['_precomputed_cut'] = consistent_cut_params
 
                 chunk_indices = indices[m * chunk_len : (m + 1) * chunk_len]
 
@@ -466,55 +448,22 @@ class AlignmentCollator:
         return new_batch
 
     # -----------------------------------------------------------------------
-    # Phase 2: Per-sample preparation (cut, align downsample, mask)
+    # Phase 2: Per-sample preparation (align downsample)
     # -----------------------------------------------------------------------
     def _prepare_per_sample(self, batch):
-        """Compute align_paths after cut+downsample, is_cut_mask, has_dustbin; cache in batch[i]."""
+        """Compute align_paths after downsample; cache in batch[i]."""
         for i in range(len(batch)):
             # Per-sample target: dataset pre-builds combined align (48 frames) and stores the
             # expected length as 'num_align_frames'; fall back to config for legacy samples.
             target_num = batch[i].get('num_align_frames',
                                       getattr(CONFIG.TRAIN, 'NUM_ALIGN_FRAMES', 24))
             align_paths = list(batch[i].get('align_frame_paths', []))
-            full_align_len = len(align_paths)
-
-            # Teacher: uncut align (downsample only), cached before any cut
-            is_cut_mask = None
-            if self.mode == 'train' and 'ref_chosen_steps' in batch[i]:
-                is_cut_mask = torch.zeros(len(batch[i]['ref_chosen_steps']), dtype=torch.float)
-
-            has_dustbin = (
-                'ref_chosen_steps' in batch[i]
-                and len(batch[i]['ref_chosen_steps']) > 0
-                and batch[i]['ref_chosen_steps'][0] == -1
-            )
-
-            if self.mode == 'train' and full_align_len > 0:
-                start_idx, end_idx = -1, -1
-                if '_precomputed_cut' in batch[i]:
-                    start_idx, end_idx = batch[i]['_precomputed_cut']
-                else:
-                    cut_pct = random.uniform(CONFIG.TRAIN.CUT_RANGE[0], CONFIG.TRAIN.CUT_RANGE[1])
-                    cut_len = int(full_align_len * cut_pct)
-                    if cut_len > 0:
-                        max_start = full_align_len - cut_len
-                        start_idx = random.randint(0, max_start)
-                        end_idx = start_idx + cut_len
-
-                if start_idx >= 0 and end_idx >= 0:
-                    align_paths = align_paths[:start_idx] + align_paths[end_idx:]
-                    if 'ref_chosen_steps' in batch[i]:
-                        r_steps = batch[i]['ref_chosen_steps']
-                        mask = (r_steps >= start_idx) & (r_steps < end_idx)
-                        is_cut_mask = mask.float()
 
             if len(align_paths) > target_num:
                 idxs = np.linspace(0, len(align_paths) - 1, target_num, dtype=int)
                 align_paths = [align_paths[k] for k in idxs]
 
             batch[i]['_cached_align_paths'] = align_paths
-            batch[i]['_is_cut_mask'] = is_cut_mask
-            batch[i]['_has_dustbin'] = has_dustbin
 
         return batch
 
@@ -523,7 +472,7 @@ class AlignmentCollator:
     # -----------------------------------------------------------------------
     def _pack_sequence(self, sink, video_imgs, chunk_imgs, is_ref_row, seq_len_val,
                        group_id, chunk_id, frame_paths, ref_frame_paths, name, ref_name,
-                       dataset_name, aug_params, ref_aug_params, is_cut_mask, has_dustbin,
+                       dataset_name, aug_params, ref_aug_params,
                        update_metadata=True, joint_per_chunk=None):
         """Run Qwen processor for one row and write results to sink.
 
@@ -560,16 +509,10 @@ class AlignmentCollator:
                 sink['num_mains'].append(0)
                 sink['num_refs'].append(num_c)
                 sink['ref_seq_lens'].extend([seq_len_val] * num_c)
-                sink['is_cut_masks'].append(
-                    is_cut_mask if (is_cut_mask is not None and is_cut_mask.numel() > 0)
-                    else torch.zeros(num_c, dtype=torch.float))
-                sink['has_dustbin'].append(has_dustbin)
             else:
                 sink['num_mains'].append(num_c)
                 sink['num_refs'].append(0)
                 sink['main_seq_lens'].extend([seq_len_val] * num_c)
-                sink['is_cut_masks'].append(torch.zeros(num_c, dtype=torch.float))
-                sink['has_dustbin'].append(False)
 
             sink['group_ids'].append(group_id)
             sink['chunk_ids'].append(chunk_id)
@@ -689,7 +632,6 @@ class AlignmentCollator:
             'num_mains': [], 'num_refs': [],
             'group_ids': [], 'chunk_ids': [],
             'main_seq_lens': [], 'ref_seq_lens': [],
-            'is_cut_masks': [], 'has_dustbin': [],
             'frame_paths': [], 'ref_frame_paths': [],
             'names': [], 'ref_names': [], 'dataset_names': [],
             'aug_params': [], 'ref_aug_params': [],
@@ -718,7 +660,6 @@ class AlignmentCollator:
                 ref_name=batch[i].get('ref_name', 'unknown'),
                 dataset_name=batch[i].get('dataset_name', 'unknown'),
                 aug_params=p['params_main'], ref_aug_params=p['params_ref'],
-                is_cut_mask=None, has_dustbin=False,
                 update_metadata=update_metadata,
                 joint_per_chunk=p['main_joints'])
 
@@ -737,8 +678,6 @@ class AlignmentCollator:
                 ref_name=batch[i].get('ref_name', 'unknown'),
                 dataset_name=batch[i].get('dataset_name', 'unknown'),
                 aug_params=p['params_main'], ref_aug_params=p['params_ref'],
-                is_cut_mask=batch[i]['_is_cut_mask'],
-                has_dustbin=batch[i]['_has_dustbin'],
                 update_metadata=update_metadata,
                 joint_per_chunk=p['ref_joints'])
 
@@ -769,7 +708,7 @@ class AlignmentCollator:
         if shared_metadata is not None:
             # Teacher: reuse all metadata tensors from student
             for k in ('seq_lens', 'num_mains', 'num_refs', 'group_ids', 'chunk_ids',
-                      'is_cut_masks', 'has_dustbin', 'cls_token_id', 'align_end_token_id'):
+                      'cls_token_id', 'align_end_token_id'):
                 d[k] = shared_metadata[k]
         else:
             # Student: build metadata from sink arrays
@@ -779,8 +718,6 @@ class AlignmentCollator:
             d['num_refs']   = torch.tensor(sink['num_refs'],   dtype=torch.long)
             d['group_ids']  = torch.tensor(sink['group_ids'],  dtype=torch.long)
             d['chunk_ids']  = torch.tensor(sink['chunk_ids'],  dtype=torch.long)
-            d['is_cut_masks']  = torch.stack(sink['is_cut_masks']) if sink['is_cut_masks'] else None
-            d['has_dustbin']   = torch.tensor(sink['has_dustbin'], dtype=torch.bool)
             d['cls_token_id']        = torch.tensor(CONFIG.SPECIAL_TOKENS.CLS_TOKEN_ID,        dtype=torch.long)
             d['align_end_token_id']  = torch.tensor(CONFIG.SPECIAL_TOKENS.ALIGN_END_TOKEN_ID,  dtype=torch.long)
 
@@ -871,9 +808,6 @@ class AlignmentCollator:
             # Conditional fields (Pass 2 / ref row)
             sink_main['num_refs']       = sink_main['num_mains'][:]
             sink_main['ref_seq_lens']   = sink_main['main_seq_lens'][:]
-            sink_main['is_cut_masks']   = sink_main['is_cut_masks'] + \
-                [torch.zeros(n, dtype=torch.float) for n in sink_main['num_mains']]
-            sink_main['has_dustbin']    = sink_main['has_dustbin']  + [False] * len(sink_main['num_mains'])
             # Unconditional fields (_pack_sequence appends these for every row)
             sink_main['group_ids']      = sink_main['group_ids']      + sink_main['group_ids'][:]
             sink_main['chunk_ids']      = sink_main['chunk_ids']      + sink_main['chunk_ids'][:]
@@ -1504,12 +1438,6 @@ class AlignmentDataset(Dataset):
         
         context_steps = []
         for step in steps:
-            if step == -1:
-                # Dustbin Chunk: return -1s
-                indices = np.full(num_context, -1, dtype=int)
-                context_steps.append(indices)
-                continue
-
             # Range: [step - (num-1)*stride, ..., step + stride] with stride
             if not reverse:
                 start = step - (num_context - 1) * stride
@@ -1532,10 +1460,9 @@ class AlignmentDataset(Dataset):
     def _context_steps_to_paths(self, context_steps, files):
         """Convert flat context_steps array to a list of file paths (or numpy frames).
 
-        Step value -1 maps to the string "DUSTBIN"; all others index into files.
         Works for both filesystem paths (str/Path) and numpy/tensor arrays (pickle mode).
         """
-        return ["DUSTBIN" if i == -1 else files[i] for i in context_steps]
+        return [files[i] for i in context_steps]
 
     def _resolve_joint_mapping(self, dataset_name, video_dir):
         """Look up joint mapping entry for this dataset + video_dir.
@@ -1675,55 +1602,10 @@ class AlignmentDataset(Dataset):
             → replaces "{old_view}.mp4" with "{new_view}.mp4"
           - Image directory: "/ep/images/frame_042.jpg"
             → replaces "/{old_view}/" with "/{new_view}/"
-        "DUSTBIN" is returned unchanged.
         """
-        if path == "DUSTBIN":
-            return path
         if f'{old_view}.mp4' in path:
             return path.replace(f'{old_view}.mp4', f'{new_view}.mp4')
         return path.replace(f'/{old_view}/', f'/{new_view}/')
-
-    def _load_frames(self, files, steps):
-        """
-        Load frames from either file paths, numpy arrays, or torch tensors.
-        
-        Args:
-            files: List of file paths (strings), numpy array (N, H, W, 3), or torch.Tensor
-            steps: Array of frame indices to load
-        
-        Returns:
-            Tensor of shape (T, C, H, W)
-        """
-        frames = []
-        is_numpy_array = isinstance(files, np.ndarray)
-        is_torch_tensor = torch.is_tensor(files)
-        
-        for step in steps:
-            if step == -1:
-                # Dustbin: Black Image
-                img = Image.new('RGB', (CONFIG.IMAGE_SIZE, CONFIG.IMAGE_SIZE), (0, 0, 0))
-            else:
-                if is_torch_tensor:
-                    # Load from torch tensor (rollout data)
-                    img_array = files[step]  # (H, W, 3)
-                    if img_array.device != torch.device('cpu'):
-                        img_array = img_array.cpu()
-                    img = Image.fromarray(img_array.numpy().astype(np.uint8)).convert('RGB')
-                elif is_numpy_array:
-                    # Load from numpy array (pickle data)
-                    img_array = files[step]  # (H, W, 3)
-                    img = Image.fromarray(img_array.astype(np.uint8)).convert('RGB')
-                else:
-                    # Load from file path
-                    path = files[step]
-                    with Image.open(path) as img:
-                        img = img.convert('RGB')
-            
-            if self.transform:
-                img = self.transform(img)
-            frames.append(img)
-                
-        return torch.stack(frames) # (T, C, H, W)
 
     # -----------------------------------------------------------------------
     # cam_mapping helpers (ported from datasets_3_views.py)
@@ -2180,17 +2062,7 @@ class AlignmentDataset(Dataset):
             num_steps = steps_1x
         
         main_steps = self._sample_steps(len(main_files), num_steps)
-        
-        # Dustbin Logic: only enabled when CUT_RANGE is non-zero.
-        # When CUT_RANGE=[0,0] (no cuts), skip the dustbin prepend so that
-        # len(ref_steps) == len(main_steps) → T1 == T2 throughout the pipeline.
-        _cut_range = getattr(CONFIG.TRAIN, 'CUT_RANGE', [0, 0])
-        _use_dustbin = (_cut_range[0] > 0 or _cut_range[1] > 0)
-        if _use_dustbin:
-            ref_steps_real = self._sample_steps(len(ref_files), num_steps - 1)
-            ref_steps = np.concatenate([[-1], ref_steps_real])
-        else:
-            ref_steps = self._sample_steps(len(ref_files), num_steps)
+        ref_steps = self._sample_steps(len(ref_files), num_steps)
 
         # Joint state loading (no-op when USE_JOINTS=False or pickle mode)
         main_joint_per_step = None
@@ -2261,14 +2133,10 @@ class AlignmentDataset(Dataset):
             main_frame_paths = []
             main_frame_paths_logical = []  # For JSON logging
             for i in main_context_steps:
-                if i == -1:
-                    main_frame_paths.append("DUSTBIN")
-                    main_frame_paths_logical.append("DUSTBIN")
-                else:
-                    # Pass actual numpy array for Collator
-                    main_frame_paths.append(main_files[i])
-                    # Store logical path for JSON logging
-                    main_frame_paths_logical.append(f"{self.pickle_path}:{video_path}/{view}/frame_{i}")
+                # Pass actual numpy array for Collator
+                main_frame_paths.append(main_files[i])
+                # Store logical path for JSON logging
+                main_frame_paths_logical.append(f"{self.pickle_path}:{video_path}/{view}/frame_{i}")
             
             # Ref uses expert_path if available
             ref_source_path = self.expert_path if self.expert_path else self.pickle_path
@@ -2276,12 +2144,8 @@ class AlignmentDataset(Dataset):
             final_ref_paths = []
             final_ref_paths_logical = []
             for i in ref_context_steps:
-                if i == -1:
-                    final_ref_paths.append("DUSTBIN")
-                    final_ref_paths_logical.append("DUSTBIN")
-                else:
-                    final_ref_paths.append(ref_files[i])
-                    final_ref_paths_logical.append(f"{ref_source_path}:{ref_video_path}/{view}/frame_{i}")
+                final_ref_paths.append(ref_files[i])
+                final_ref_paths_logical.append(f"{ref_source_path}:{ref_video_path}/{view}/frame_{i}")
             
             # Align paths: combine main (first half) + ref (second half).
             # No multi-view in pickle mode; num_align frames per segment → 2*num_align total.
@@ -2568,498 +2432,4 @@ def create_dataset(split, mode, batch_size=None, return_iterator=True, distribut
     
     if return_iterator and mode == 'train':
         return InfiniteDataLoader(dataloader, sampler=sampler)
-    return dataloader
-
-class AlignmentVideoDataset(AlignmentDataset):
-    def __init__(self, mode='eval', transform=None, video_paths_json=None, processor=None, chunk_size=None):
-        self.pickle_data = None
-        self.expert_data = None
-        self.is_rollout_mode = False
-        
-        is_pickle = isinstance(video_paths_json, str) and video_paths_json.endswith('.pkl')
-        
-        if is_pickle:
-            # Initialize without paths first to avoid super().__init__ trying to load pkl as json
-            super().__init__(mode, transform, None, processor)
-            print(f"Loading video paths from pickle: {video_paths_json}")
-            
-            if 'rollout' in os.path.basename(video_paths_json):
-                self.is_rollout_mode = True
-                with open(video_paths_json, 'rb') as f:
-                    self.pickle_data = pickle.load(f)
-                
-                # Load corresponding expert data
-                expert_path = os.path.join(os.path.dirname(video_paths_json), 'libero_10-expert-video.pkl')
-                if os.path.exists(expert_path):
-                    print(f"Loading corresponding expert data from: {expert_path}")
-                    with open(expert_path, 'rb') as f:
-                        self.expert_data = pickle.load(f)
-                
-                rb = self.pickle_data['rollout_batch']
-                self.task_descriptions = rb['task_descriptions']
-                num_videos = len(self.task_descriptions)
-                
-                # Reorganize images for easier access: (N_chunks, B, Chunk_size, H, W, 3) -> (B, Total_frames, H, W, 3)
-                # observation/full_image_list: [48, 16, 10, 256, 256, 3]
-                full_imgs = rb['observation/full_image_list']
-                n_chunks, b_size, c_size = full_imgs.shape[:3]
-                # Permute to (batch, chunk, chunk_frames, H, W, 3) then reshape
-                self.rollout_images = full_imgs.permute(1, 0, 2, 3, 4, 5).reshape(b_size, n_chunks * c_size, *full_imgs.shape[3:])
-                
-                # Assume wrist images are also there if available, else fallback
-                if 'observation/wrist_image' in rb:
-                    # observation/wrist_image: [48, 16, 256, 256, 3]
-                    wrist_imgs = rb['observation/wrist_image']
-                    # Repeat or pad to match full_image_list length if necessary
-                    # For now, let's just use what we have, but it might be shorter (1/10th frequency)
-                    self.rollout_wrist_images = wrist_imgs.permute(1, 0, 2, 3, 4)
-                else:
-                    self.rollout_wrist_images = None
-
-                self.video_paths = [f"rollout_{i}" for i in range(num_videos)]
-                self.video_weights = [1.0] * num_videos
-                self.video_dataset_names = ["rollout_dataset"] * num_videos
-            else:
-                with open(video_paths_json, 'rb') as f:
-                    self.pickle_data = pickle.load(f)
-                self.video_paths = sorted(list(self.pickle_data.keys()))
-                self.video_weights = [1.0] * len(self.video_paths)
-                self.video_dataset_names = ["pickle_dataset"] * len(self.video_paths)
-            
-            # Re-initialize weights for sampler if needed (though usually for training)
-            self.weights = []
-            for w in self.video_weights:
-                self.weights.append(w)
-            
-            self.views = ['images']  # Force single view for pickle/rollout mode
-        else:
-            super().__init__(mode, transform, video_paths_json, processor)
-            self.views = ['images']  # Also force single view here for evaluation consistency
-            
-        self.chunk_size = chunk_size
-        self.all_chunks = []
-        
-        # Stride for frames to sample from video
-        stride = CONFIG.DATA.SAMPLE_ALL_STRIDE if hasattr(CONFIG.DATA, 'SAMPLE_ALL_STRIDE') else 1
-        
-        for video_idx, video_info in enumerate(self.video_paths):
-            for view in self.views:
-                if self.is_rollout_mode:
-                    # In rollout mode, we use the pre-extracted tensors/arrays
-                    if view == 'images':
-                        files = self.rollout_images[video_idx]
-                    else:
-                        files = self.rollout_wrist_images[video_idx] if self.rollout_wrist_images is not None else self.rollout_images[video_idx]
-                elif self.pickle_data is not None:
-                    # In standard expert pickle mode, files is a numpy array (N, H, W, 3)
-                    # video_info is a string key in pickle mode
-                    files = self.pickle_data[video_info].get(view, [])
-                else:
-                    # JSON mode: pass video_info and view to _get_files
-                    files = self._get_files(video_info, view=view)
-                
-                if files is None or len(files) == 0:
-                    continue
-                
-                # Full list of sampled indices for this video
-                indices = np.arange(0, len(files), stride)
-                
-                # We need to know candidate files to know how many candidate chunks there are
-                # But to keep it simple and consistent with query chunks:
-                # We just assume we extract candidate chunks paired with query chunks
-                
-                if self.chunk_size and self.chunk_size > 0:
-                    for i in range(0, len(indices), self.chunk_size):
-                        chunk_indices = indices[i : i + self.chunk_size]
-                        self.all_chunks.append({
-                            'video_idx': video_idx,
-                            'view': view,
-                            'indices': chunk_indices,
-                            'chunk_idx': i // self.chunk_size,
-                            'frame_offset': i,
-                            'global_indices': chunk_indices 
-                        })
-                else:
-                    self.all_chunks.append({
-                        'video_idx': video_idx,
-                        'view': view,
-                        'indices': indices,
-                        'chunk_idx': 0,
-                        'frame_offset': 0,
-                        'global_indices': indices
-                    })
-
-    def __len__(self):
-        return len(self.all_chunks)
-
-    def _get_item_impl(self, index):
-        chunk_info = self.all_chunks[index]
-        video_idx = chunk_info['video_idx']
-        view = chunk_info['view']
-        indices = chunk_info['indices']
-        global_indices = chunk_info['global_indices']
-        
-        video_info = self.video_paths[video_idx]
-        task_name = None
-        
-        if self.is_rollout_mode:
-            task_name = self.task_descriptions[video_idx]
-            if view == 'images':
-                files = self.rollout_images[video_idx]
-            else: # gripper_images
-                # observation/wrist_image is (48, 256, 256, 3)
-                # rollout_images is (480, 256, 256, 3)
-                # We need to map 480 to 48
-                wrist_imgs = self.rollout_wrist_images[video_idx] if self.rollout_wrist_images is not None else self.rollout_images[video_idx]
-                
-                # We will handle the indexing in the loop by creating a custom 'files' object or repeating
-                # For simplicity, if frequencies don't match, we map current idx to wrist idx
-                files = wrist_imgs # (48, 256, 256, 3)
-        elif self.pickle_data is not None:
-            # In pickle mode, video_info is a string key
-            files = self.pickle_data[video_info][view]
-        else:
-            # JSON mode: pass video_info and view to _get_files
-            files = self._get_files(video_info, view=view)
-        
-        # --- Query Frames (Dense Extraction) ---
-        # Stride
-        stride = CONFIG.DATA.SAMPLE_ALL_STRIDE if hasattr(CONFIG.DATA, 'SAMPLE_ALL_STRIDE') else 1
-        
-        # We need to handle context if NUM_STEPS > 1
-        num_context = CONFIG.DATA.NUM_STEPS
-        # Extract video_path string for _get_stride
-        video_path_str = video_info.get('video_dir') if isinstance(video_info, dict) else video_info
-        context_stride = self._get_stride(video_path_str)
-        
-        # indices is provided by chunk_info in __getitem__
-        
-        # Pad indices to chunk_size if necessary
-        if self.chunk_size and self.chunk_size > 0:
-            if len(indices) < self.chunk_size:
-                pad_len = self.chunk_size - len(indices)
-                indices = np.concatenate([indices, [indices[-1]] * pad_len])
-                global_indices = np.concatenate([global_indices, [global_indices[-1]] * pad_len])
-        
-        frames = []
-        for idx in indices:
-            if idx == -1:
-                # Dustbin Context: NUM_STEPS black frames
-                frames.append(torch.zeros(num_context, 3, CONFIG.IMAGE_SIZE, CONFIG.IMAGE_SIZE))
-                continue
-
-            # Context window logic matching _get_context_steps
-            # Range: [step - (num-1)*stride, ..., step + stride] with stride
-            start = idx - (num_context - 1) * context_stride
-            end = idx + context_stride
-            
-            ctx_indices = np.arange(start, end, context_stride)
-            ctx_indices = np.clip(ctx_indices, 0, len(files) - 1)
-            
-            # Load context frames
-            ctx_frames = []
-            for ctx_idx in ctx_indices:
-                if self.is_rollout_mode:
-                    if view == 'images':
-                        img_data = files[ctx_idx]
-                    else:
-                        # Map 480 frames to 48 (10x difference)
-                        img_data = files[ctx_idx // 10]
-                    
-                    # Convert torch tensor to PIL
-                    if torch.is_tensor(img_data):
-                        img = Image.fromarray(img_data.cpu().numpy().astype(np.uint8)).convert('RGB')
-                    else:
-                        img = Image.fromarray(img_data.astype(np.uint8)).convert('RGB')
-                        
-                    if self.transform:
-                        img = self.transform(img)
-                    ctx_frames.append(img)
-                elif self.pickle_data is not None:
-                    # frames in pickle are numpy arrays
-                    img = Image.fromarray(files[ctx_idx]).convert('RGB')
-                    if self.transform:
-                        img = self.transform(img)
-                    ctx_frames.append(img)
-                else:
-                    path = files[ctx_idx]
-                    try:
-                        with Image.open(path) as img:
-                            img = img.convert('RGB')
-                            if self.transform:
-                                img = self.transform(img)
-                            ctx_frames.append(img)
-                    except Exception as e:
-                        print(f"Error loading image {path}: {e}")
-                        ctx_frames.append(torch.zeros(3, CONFIG.IMAGE_SIZE, CONFIG.IMAGE_SIZE))
-            
-            # Stack context frames: (NUM_STEPS, C, H, W)
-            frames.append(torch.stack(ctx_frames))
-        
-        if not frames:
-             frames = torch.zeros(1, num_context, 3, CONFIG.IMAGE_SIZE, CONFIG.IMAGE_SIZE)
-        else:
-            # Stack all steps: (T, NUM_STEPS, C, H, W)
-            frames = torch.stack(frames)
-            
-        # --- Candidate Frames (Sampled like Training) ---
-        if self.is_rollout_mode:
-            candidate_video_path = task_name
-            # Use expert data as candidate
-            if self.expert_data is not None and task_name in self.expert_data:
-                candidate_files = self.expert_data[task_name][view]
-            else:
-                candidate_files = files # Fallback to query
-            candidate_pool = [task_name]
-        elif self.pickle_data is not None:
-            # In pickle mode, video_info is a string key
-            candidate_video_path = video_info
-            candidate_files = files
-            candidate_pool = [video_info]
-        else:
-            # Get Task Paths (Reference Videos)
-            # Determine task_paths_file location based on format
-            video_dir = video_info.get('video_dir') if isinstance(video_info, dict) else video_info
-            video_path = video_info.get('original_path') if isinstance(video_info, dict) else video_info
-            dataset_name = self.video_dataset_names[video_idx] if video_idx < len(self.video_dataset_names) else "unknown"
-
-            if isinstance(video_info, dict) and video_info.get('segment_id') is not None:
-                # New format: load from segment subfolder
-                segment_id = video_info['segment_id']
-                task_paths_file = os.path.join(video_dir, str(segment_id), 'task_paths.json')
-            else:
-                # Old format: load from video root directory
-                task_paths_file = os.path.join(video_dir, 'task_paths.json')
-            
-            # Load task_paths directly (no cache)
-            task_paths = {}
-            if os.path.exists(task_paths_file):
-                try:
-                    with open(task_paths_file, 'r') as f:
-                        task_paths = json.load(f)
-                except:
-                    task_paths = {}
-            else:
-                print(f"Warning: task_paths.json not found at {task_paths_file}")
-            
-            same_pool_keys = ["same"]
-            candidate_pool = []
-            for key in same_pool_keys:
-                if key in task_paths and task_paths[key]:
-                    candidate_pool.extend(task_paths[key])
-            
-            if not candidate_pool and os.path.exists(task_paths_file):
-                print(f"Warning: candidate_pool is empty for {task_paths_file}")
-            
-            # Only parse the selected path (lazy parsing for performance)
-            if self.mode == 'train':
-                if candidate_pool:
-                    selected_path = random.choice(candidate_pool)
-                    candidate_video_info = self._parse_video_path(selected_path, dataset_name)
-                else:
-                    # Fallback: use same video as candidate if no others available
-                    candidate_video_info = video_info
-            else:
-                # Deterministic for eval
-                if candidate_pool:
-                    selected_path = sorted(candidate_pool)[0]  # Sort strings directly
-                    candidate_video_info = self._parse_video_path(selected_path, dataset_name)
-                else:
-                    candidate_video_info = video_info
-                
-            candidate_files = self._get_files(candidate_video_info, view=view)
-            
-            if not candidate_files:
-                candidate_files = files # Fallback to query files
-                candidate_video_info = video_info
-            
-        # For logging/debugging (extract string path)
-        if not self.is_rollout_mode and self.pickle_data is None:
-            candidate_video_path = candidate_video_info.get('original_path') if isinstance(candidate_video_info, dict) else candidate_video_info
-            
-        # Sampling
-        # Use dense sampling for candidate frames as well (same as query frames)
-        candidate_indices = np.arange(0, len(candidate_files), stride)
-        # Prepend Dustbin to Candidate base list as well
-        candidate_indices = np.concatenate([[-1], candidate_indices])
-        
-        # Chunk candidate indices if needed
-        if self.chunk_size and self.chunk_size > 0:
-            start_off = chunk_info['frame_offset']
-            candidate_indices = candidate_indices[start_off : start_off + self.chunk_size]
-            
-            # Pad candidate_indices to chunk_size
-            if len(candidate_indices) < self.chunk_size:
-                pad_len = self.chunk_size - len(candidate_indices)
-                if len(candidate_indices) > 0:
-                    candidate_indices = np.concatenate([candidate_indices, [candidate_indices[-1]] * pad_len])
-                else:
-                    # Fallback for empty candidate
-                    candidate_indices = np.zeros(self.chunk_size, dtype=int)
-            
-        candidate_frames_list = []
-        for idx in candidate_indices:
-            if idx == -1:
-                candidate_frames_list.append(torch.zeros(num_context, 3, CONFIG.IMAGE_SIZE, CONFIG.IMAGE_SIZE))
-                continue
-
-            start = idx - (num_context - 1) * context_stride
-            end = idx + context_stride
-            
-            ctx_indices = np.arange(start, end, context_stride)
-            ctx_indices = np.clip(ctx_indices, 0, len(candidate_files) - 1)
-            
-            ctx_frames = []
-            for ctx_idx in ctx_indices:
-                if self.is_rollout_mode or self.pickle_data is not None:
-                    # In pickle/rollout mode, candidate_files is a numpy array (expert data)
-                    img = Image.fromarray(candidate_files[ctx_idx]).convert('RGB')
-                    if self.transform:
-                        img = self.transform(img)
-                    ctx_frames.append(img)
-                else:
-                    path = candidate_files[ctx_idx]
-                    try:
-                        with Image.open(path) as img:
-                            img = img.convert('RGB')
-                            if self.transform:
-                                img = self.transform(img)
-                            ctx_frames.append(img)
-                    except Exception as e:
-                        print(f"Error loading image {path}: {e}")
-                        ctx_frames.append(torch.zeros(3, CONFIG.IMAGE_SIZE, CONFIG.IMAGE_SIZE))
-            
-            candidate_frames_list.append(torch.stack(ctx_frames))
-            
-        if not candidate_frames_list:
-             candidate_frames = torch.zeros(1, num_context, 3, CONFIG.IMAGE_SIZE, CONFIG.IMAGE_SIZE)
-        else:
-            candidate_frames = torch.stack(candidate_frames_list)
-        
-        # Collect paths for Qwen
-        # Flatten frame paths: [Step0_Ctx0, Step0_Ctx1, ..., Step1_Ctx0, ...]
-        frame_paths = []
-        for idx in indices:
-            if idx == -1:
-                for _ in range(num_context):
-                    frame_paths.append("DUSTBIN")
-                continue
-
-            start = idx - (num_context - 1) * context_stride
-            end = idx + context_stride
-            ctx_indices = np.arange(start, end, context_stride)
-            ctx_indices = np.clip(ctx_indices, 0, len(files) - 1)
-            for ctx_idx in ctx_indices:
-                if self.pickle_data is not None:
-                    # Store numpy array for AlignmentCollator.load_imgs
-                    frame_paths.append(files[ctx_idx])
-                else:
-                    frame_paths.append(files[ctx_idx])
-                
-        candidate_frame_paths = []
-        for idx in candidate_indices:
-            if idx == -1:
-                for _ in range(num_context):
-                    candidate_frame_paths.append("DUSTBIN")
-                continue
-
-            start = idx - (num_context - 1) * context_stride
-            end = idx + context_stride
-            ctx_indices = np.arange(start, end, context_stride)
-            ctx_indices = np.clip(ctx_indices, 0, len(candidate_files) - 1)
-            for ctx_idx in ctx_indices:
-                if self.pickle_data is not None:
-                    candidate_frame_paths.append(candidate_files[ctx_idx])
-                else:
-                    candidate_frame_paths.append(candidate_files[ctx_idx])
-
-        # Instruction
-        if self.is_rollout_mode:
-            instruction = task_name
-            candidate_instruction = task_name
-        elif self.pickle_data is not None:
-            instruction = video_info # Task name (video_info is string in pickle mode)
-            candidate_instruction = video_info
-        else:
-            # Load instruction from video_dir
-            instruction_path = os.path.join(video_dir, 'instruction.txt')
-            instruction = "Perform the task."
-            if os.path.exists(instruction_path):
-                try:
-                    with open(instruction_path, 'r') as f:
-                        instruction = f.read().strip()
-                except:
-                    pass
-            
-            # Candidate Instruction
-            candidate_video_dir = candidate_video_info.get('video_dir') if isinstance(candidate_video_info, dict) else candidate_video_info
-            candidate_instruction_path = os.path.join(candidate_video_dir, 'instruction.txt')
-            candidate_instruction = "Perform the task."
-            if os.path.exists(candidate_instruction_path):
-                try:
-                    with open(candidate_instruction_path, 'r') as f:
-                        candidate_instruction = f.read().strip()
-                except:
-                    pass
-
-        # --- Align Video (New for Alignment) ---
-        # Use the same Reference/Candidate video as the source for the task abstraction prefix
-        align_video_info = candidate_video_info
-        align_video_path = candidate_video_info.get('original_path') if isinstance(candidate_video_info, dict) else candidate_video_info
-            
-        if self.is_rollout_mode:
-            align_files = self.expert_data[align_video_path][view] if self.expert_data and align_video_path in self.expert_data else files
-        elif self.pickle_data is not None:
-            align_files = self.pickle_data[align_video_path][view]
-        else:
-            align_files = self._get_files(align_video_info, view=view)
-            if not align_files:
-                align_files = files
-            
-        num_align_frames = getattr(CONFIG.TRAIN, 'NUM_ALIGN_FRAMES', 24)
-        align_steps = np.linspace(0, len(align_files)-1, num_align_frames, dtype=int)
-        
-        if self.pickle_data is not None:
-             align_frame_paths = [align_files[i] for i in align_steps]
-        else:
-             align_frame_paths = [align_files[i] for i in align_steps]
-
-        return {
-            'frames': frames,
-            'candidate_frames': candidate_frames,
-            'name': f"{video_path}/{view}",
-            'candidate_name': f"{candidate_video_path}/{view}",
-            'seq_lens': torch.tensor(len(frames)),
-            'candidate_seq_lens': torch.tensor(len(candidate_frames)),
-            'label': torch.tensor(0), # Dummy
-            # For Reconstruction
-            'video_name': f"{video_path}/{view}",
-            'chunk_idx': chunk_info['chunk_idx'],
-            'global_indices': torch.tensor(global_indices),
-            'candidate_global_indices': torch.tensor(candidate_indices),
-            'ref_chosen_steps': torch.tensor(candidate_indices), # Expose for AlignmentCollator dustbin detection
-            # For Qwen
-            'frame_paths': frame_paths,
-            'ref_frame_paths': candidate_frame_paths, # Use ref_frame_paths key for collator compatibility
-            'align_frame_paths': align_frame_paths,
-            'instruction': instruction,
-            'initial_frame_path': files[0],
-            'ref_instruction': candidate_instruction,
-            'ref_initial_frame_path': candidate_files[0]
-        }
-
-def create_one_epoch_dataset(split, mode, batch_size=1, return_iterator=True, video_paths_json=None, processor=None, chunk_size=None):
-    transform = get_transforms(mode)
-    dataset = AlignmentVideoDataset(mode=mode, transform=transform, video_paths_json=video_paths_json, processor=processor, chunk_size=chunk_size)
-    
-    collator = None
-    if processor is not None:
-        collator = AlignmentCollator(processor=processor, mode=mode)
-        
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=4, collate_fn=collator)
-    
-    if return_iterator:
-        return iter(dataloader)
-    return dataloader
-    
     return dataloader

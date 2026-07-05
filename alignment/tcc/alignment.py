@@ -2,7 +2,6 @@
 """Variants of the cycle-consistency loss described in TCC paper."""
 
 import torch
-from config import CONFIG
 from .deterministic_alignment import compute_deterministic_alignment_loss, compute_deterministic_alignment_loss_paired
 from .stochastic_alignment import compute_stochastic_alignment_loss
 
@@ -31,8 +30,6 @@ def compute_alignment_loss(embs,
                            raw_tokens=None,
                            gate_module=None,
                            precomputed_gates=None,
-                           is_cut_mask=None,
-                           has_dustbin=None,
                            global_step=None,
                            training=True):
   """Computes alignment loss between sequences of embeddings."""
@@ -62,9 +59,6 @@ def compute_alignment_loss(embs,
 
       # --- REDUNDANT MERGING REMOVED: Rely on Algorithm.forward() for merging ---
       # In ZeRO-3, merging must happen in forward().
-      merged_cut_masks_ref = is_cut_mask
-      merged_db_flags_ref = has_dustbin
-      
       loss, loss_dict = compute_deterministic_alignment_loss_paired(
           embs_main, embs_ref, steps_main, steps_ref, seq_lens_main, seq_lens_ref,
           num_steps, real_batch_size, loss_type, similarity_type, temperature,
@@ -72,12 +66,6 @@ def compute_alignment_loss(embs,
           normalize_embeddings=normalize_embeddings,
           tcc_regression_margin=tcc_regression_margin,
           causal_lambda=causal_lambda, causal_margin=causal_margin,
-          is_cut_mask=merged_cut_masks_ref,
-          has_dustbin=merged_db_flags_ref,
-          dustbin_coeff=CONFIG.TRAIN.DUSTBIN_COEFF,
-          dustbin_loss_weight=CONFIG.TRAIN.get('DUSTBIN_LOSS_WEIGHT', 1.0),
-          global_dustbin_loss_weight=CONFIG.TRAIN.get('GLOBAL_DUSTBIN_LOSS_WEIGHT', 1.0),
-          global_dustbin_loss_tolerance=CONFIG.TRAIN.get('GLOBAL_DUSTBIN_LOSS_TOLERANCE', 0.1),
           forward_variance_lambda=forward_variance_lambda,
           raw_tokens_main=raw_tokens_main,
           raw_tokens_ref=raw_tokens_ref,

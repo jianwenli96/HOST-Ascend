@@ -167,21 +167,9 @@ class Algorithm(nn.Module):
             seq_lens_main = seq_lens[:real_batch_size]
             seq_lens_ref = seq_lens[real_batch_size:]
             
-            # Masks & Dustbin Flags
-            has_cut_masks = 'is_cut_masks' in qwen_meta and qwen_meta['is_cut_masks'] is not None
-            cut_masks = qwen_meta['is_cut_masks'] if has_cut_masks else None 
-            has_db_flags = 'has_dustbin' in qwen_meta and qwen_meta['has_dustbin'] is not None
-            db_flags = qwen_meta['has_dustbin'] if has_db_flags else None
-            
-            if has_cut_masks:
-                 cut_masks_ref = cut_masks[real_batch_size:]
-            if has_db_flags:
-                 db_flags_ref = db_flags[real_batch_size:]
-
             new_embs_main, new_steps_main, new_seq_lens_main = [], [], []
             new_embs_ref, new_steps_ref, new_seq_lens_ref = [], [], []
             new_tokens_m, new_tokens_r = [], []
-            new_cut_masks_ref, new_db_flags_ref = [], []
             merged_meta_list = []
 
             # Handle tokens if present
@@ -215,13 +203,6 @@ class Algorithm(nn.Module):
                     curr_tokens_r = r_tokens_all[mask][chunk_idx]
                     new_tokens_r.append(curr_tokens_r.reshape(-1, curr_tokens_r.size(-2), curr_tokens_r.size(-1)))
 
-                # Merge Masks
-                if has_cut_masks:
-                    curr_mask_r = cut_masks_ref[mask][chunk_idx]
-                    new_cut_masks_ref.append(curr_mask_r.reshape(-1))
-                if has_db_flags:
-                    new_db_flags_ref.append(db_flags_ref[mask][chunk_idx[0]])
-                
                 # Merge Metadata for logging
                 first_idx = mask.nonzero(as_tuple=True)[0][chunk_idx[0]].item()
                 all_paths_m, all_paths_r = [], []
@@ -272,8 +253,6 @@ class Algorithm(nn.Module):
                 'steps': torch.cat([steps_main, steps_ref], dim=0),
                 'seq_lens': torch.cat([seq_lens_main, seq_lens_ref], dim=0),
                 'gates': gates,
-                'is_cut_masks': torch.stack(new_cut_masks_ref) if has_cut_masks else None,
-                'has_dustbin': torch.stack(new_db_flags_ref) if has_db_flags else None,
                 'merged_metadata': merged_meta_list,
                 'raw_tokens': {
                     'mains_tokens': tokens_m,

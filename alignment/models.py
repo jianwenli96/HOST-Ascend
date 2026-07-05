@@ -212,13 +212,9 @@ class BaseModel(nn.Module):
             # Step 4: Inject Group Info for Attention Mask
             if 'num_mains' in inputs and 'num_refs' in inputs:
                 forward_kwargs['num_video_groups'] = inputs['num_mains'] + inputs['num_refs']
-                
-                # Pass flags for Dustbin Attention Logic
                 forward_kwargs['num_mains'] = inputs['num_mains']
                 forward_kwargs['num_refs'] = inputs['num_refs']
-                if 'has_dustbin' in inputs:
-                    forward_kwargs['has_dustbin'] = inputs['has_dustbin']
-                
+
                 # Pass CLS token ID for content_end detection in monkey patch
                 if 'cls_token_id' in inputs:
                     forward_kwargs['cls_token_id'] = inputs['cls_token_id']
