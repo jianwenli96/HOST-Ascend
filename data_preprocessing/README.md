@@ -67,8 +67,8 @@ mapping, joint/action mapping, and any per-dataset config dicts (`dataset_fps`,
 - `policy_training/`: passed via `data.train.data_path` (comma-separated if multiple files); an
   `exclude_episode_json` field of the same format excludes listed episodes.
 - `alignment/`: passed via `--video_paths` (comma-separated). Entries may also address a segment
-  of a longer recording as `path:segment_id:start-end` (inclusive frame range) — see
-  `alignment/SEGMENTED_VIDEO_FORMAT.md` for that case.
+  of a longer recording as `path:segment_id:start-end` (inclusive frame range), parsed by
+  `AlignmentDataset._parse_video_path` in `alignment/datasets.py`.
 
 ### 2.2. Episode directory contents
 

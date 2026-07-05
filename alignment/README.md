@@ -60,8 +60,8 @@ robot actions/joint data are required unless you enable joint conditioning
 (`CONFIG.JOINTS.USE_JOINTS`); see
 [§2.6 of `data_preprocessing/README.md`](../data_preprocessing/README.md#26-per-module-differences)
 for the exact per-module requirements. Video-paths entries can also address a segment of a longer
-recording as `path:segment_id:start-end` (inclusive frame range) — see
-`alignment/SEGMENTED_VIDEO_FORMAT.md` for that case.
+recording as `path:segment_id:start-end` (inclusive frame range), parsed by
+`AlignmentDataset._parse_video_path` in `datasets.py`.
 
 Relevant `config.py` fields:
 

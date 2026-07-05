@@ -73,7 +73,7 @@ export DIFFSYNTH_MODEL_BASE_PATH="$(pwd)/checkpoints"
 
 ```bash
 python scripts/preprocess_action_dit_backbone.py \
-  --model-config configs/model/self_grounded_predictor_joint.yaml \
+  --model-config configs/model/self_grounded_predictor_joint_cross_attn_ve.yaml \
   --output checkpoints/ActionDiT_linear_interp_Wan22_alphascale_1024hdim.pt \
   --device cuda \
   --dtype bfloat16
@@ -90,7 +90,7 @@ episode 目录结构、相机映射、关节/动作归一化）。仓库自带�
 `policy_training/` 具体要求 **必须** 提供动作/关节轨迹（`episode_001.json`）和文本指令
 （`instruction.txt`/`instruction.pt`）字段 —— 各模块的具体要求差异见
 [`data_preprocessing/README.md` 第 2.6 节](../data_preprocessing/README.md#26-per-module-differences)。
-此外还需在 `configs/data/custom.yaml` 中按 dataset id 设置：`dataset_fps`（用于最短长度过滤与
+此外还需在 `configs/data/custom_cross_all.yaml` 中按 dataset id 设置：`dataset_fps`（用于最短长度过滤与
 动作帧采样）和 `dataset_image_size`（`[width, height]`）。如果你的数据集动作维度与示例不同，
 需同步更新 `processor.action_output_dim` / `processor.proprio_output_dim`，以及模型配置里对应的
 `action_dim`。

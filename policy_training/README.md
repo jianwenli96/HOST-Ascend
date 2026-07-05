@@ -76,7 +76,7 @@ Step 2: pre-generate the ActionDiT backbone (interpolated from Wan2.2 DiT):
 
 ```bash
 python scripts/preprocess_action_dit_backbone.py \
-  --model-config configs/model/self_grounded_predictor_joint.yaml \
+  --model-config configs/model/self_grounded_predictor_joint_cross_attn_ve.yaml \
   --output checkpoints/ActionDiT_linear_interp_Wan22_alphascale_1024hdim.pt \
   --device cuda \
   --dtype bfloat16
@@ -94,7 +94,7 @@ team's internal cluster paths — replace `data_path` / `cam_mapping_dir` /
 `policy_training/` specifically **requires** the action/joint trajectory (`episode_001.json`) and
 text instruction (`instruction.txt`/`instruction.pt`) fields described there — see
 [§2.6 of `data_preprocessing/README.md`](../data_preprocessing/README.md#26-per-module-differences)
-for the exact per-module requirements. Also set, per dataset id in `configs/data/custom.yaml`:
+for the exact per-module requirements. Also set, per dataset id in `configs/data/custom_cross_all.yaml`:
 `dataset_fps` (minimum-length filtering and action-frame sampling) and `dataset_image_size`
 (`[width, height]`). If your dataset has a different action dimensionality than the shipped
 example, update `processor.action_output_dim` / `processor.proprio_output_dim` and the
