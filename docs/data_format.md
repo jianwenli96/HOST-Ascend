@@ -43,6 +43,11 @@ Video files (`{view}.mp4`) are also supported instead of an image-sequence subdi
 count must match the number of entries in `episode_001.json`'s `"data"` array where that file is
 used — no silent truncation.
 
+`task_paths.json` and `info_dtw.json` aren't hand-authored — see [`coupling/`](../coupling/) for
+the pipeline that produces them: `coupling/task_grouping/` writes `task_paths.json` from raw
+episode directories, and `coupling/progress_alignment/` writes `info_dtw.json` from `alignment/`'s
+own DTW training/eval output.
+
 `task_paths.json` lists peer episodes of the *same task*. `wam/` uses it to sample a reference
 task video shown alongside the primary observation; `alignment/` uses it to pick the "Reference"
 video that the "Main" video's chunks are aligned against (the `"same"` pool is preferred, a

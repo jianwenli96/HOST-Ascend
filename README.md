@@ -17,7 +17,7 @@ parameter update. It does this through two mechanisms:
 HOST/
 ├── wam/          # Self-grounded prediction: dual-expert video/action diffusion model
 ├── alignment/    # Target coupling: TCC + Smooth DTW video alignment training
-├── coupling/     # Reserved, not yet populated
+├── coupling/     # Target coupling data pipeline: task grouping + DTW progress alignment
 └── docs/         # data_format.md (shared dataset schema); reserved for future paper-mapping docs
 ```
 
@@ -25,6 +25,9 @@ Each module is self-contained with its own environment, training scripts, and RE
 
 - [`wam/README.md`](./wam/README.md) ([中文](./wam/README_zh.md))
 - [`alignment/README.md`](./alignment/README.md)
+- [`coupling/README.md`](./coupling/README.md) — the offline data pipeline that surrounds
+  `alignment/`: builds the task-grouping metadata alignment training consumes, and converts
+  alignment's own DTW output into the per-episode progress data `wam/` reads.
 
 Both modules' shipped configs reference this team's internal cluster data paths, and consume the
 **same on-disk data format** — see [`docs/data_format.md`](./docs/data_format.md) for the full
