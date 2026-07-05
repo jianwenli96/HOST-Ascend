@@ -84,91 +84,21 @@ python scripts/preprocess_action_dit_backbone.py \
 
 ## Data Preparation
 
-Training reads three things per dataset: a **video-paths list**, a **camera mapping**, and a
-**joint/action normalization mapping**. The shipped configs (`configs/data/custom*.yaml`) point at
-this team's internal cluster paths — replace `data_path` / `cam_mapping_dir` /
-`joint_action_mapping_dir` with your own, following the format below.
+`wam/` and `alignment/` consume the same on-disk data convention — see
+[`docs/data_format.md`](../docs/data_format.md) at the repo root for the full, single-source-of-truth
+schema (video-paths list, episode directory layout, camera mapping, joint/action normalization).
+The shipped configs (`configs/data/custom*.yaml`) point at this team's internal cluster paths —
+replace `data_path` / `cam_mapping_dir` / `joint_action_mapping_dir` with your own data in that
+format.
 
-### 1. Video paths list — `{dataset_id}_video_paths.json`
-
-A JSON array of episode directory paths. The dataset id is taken from the filename (e.g.
-`10042_video_paths.json` → dataset id `"10042"`), and is used as the lookup key into the camera
-mapping, joint/action mapping, and `dataset_fps`/`dataset_image_size` config dicts.
-
-```json
-["/data/episodes/task_a/episode_001", "/data/episodes/task_a/episode_002"]
-```
-
-`exclude_episode_json` (optional, in the data config) takes the same format and excludes any
-listed episode from training.
-
-### 2. Episode directory contents
-
-```text
-episode_001/
-├── episode_001.json     # action/joint trajectory — REQUIRED if actions/joints are enabled
-├── instruction.txt      # plain-text task instruction — REQUIRED
-├── instruction.pt       # precomputed T5 text embedding {"context": [L,4096], "mask": [L]}
-├── info_dtw.json        # {"aligned_progress": {"<frame_idx>": <0..1>, ...}} — optional
-├── task_paths.json      # {"same": ["/data/episodes/task_a/episode_002", ...]} — peer episodes of the same task
-├── images/              # frame sequence for one camera view: 0.jpg, 1.jpg, ...
-└── gripper_images/      # frame sequence for a second camera view (if 2-view)
-```
-
-Video files (`{view}.mp4`) are also supported instead of an image-sequence subdirectory. Frame
-count must match the number of entries in `episode_001.json`'s `"data"` array — no silent
-truncation.
-
-`episode_001.json` (action/joint trajectory):
-
-```json
-{
-  "data": [
-    {"follow_left_position": [x, y, z], "follow_left_rotation": [r, p, y], "follow_left_gripper": g,
-     "follow_right_position": [x, y, z], "follow_right_rotation": [r, p, y], "follow_right_gripper": g},
-    "... one entry per frame ..."
-  ]
-}
-```
-
-Rotations are `[roll, pitch, yaw]` Euler triples; when `use_6d_rotation: true` these are converted
-to a 6D rotation-matrix representation during loading.
-
-### 3. Camera mapping — `{cam_mapping_dir}/{dataset_id}_cam_mapping.json`
-
-Maps each task directory (one level above the episode directory) to its ordered list of camera/
-view names on disk:
-
-```json
-{"/data/episodes/task_a": ["images", "gripper_images"]}
-```
-
-`num_view_probs` (e.g. `'{"2": 1.0}'`) selects how many of the listed views to sample per batch.
-
-### 4. Joint/action normalization — `{joint_action_mapping_dir}/{dataset_id}_joint_action_mapping.json`
-
-Declares which fields to read from `episode_001.json` and their per-dimension min/delta used to
-normalize actions to `[-1, 1]` (`norm = 2*(raw - min)/delta - 1`):
-
-```json
-{
-  "action_keys": ["follow_left_position", "follow_left_rotation", "follow_left_gripper",
-                   "follow_right_position", "follow_right_rotation", "follow_right_gripper"],
-  "joint_keys": ["left_rotation", "right_rotation", "left_position", "right_position"],
-  "norm_min_delta": {
-    "follow_left_position": {"min": [-0.08, -0.08, -0.08], "delta": [0.16, 0.16, 0.16]},
-    "follow_left_rotation": {"min": [-0.30, -0.30, -0.30], "delta": [0.60, 0.60, 0.60]},
-    "follow_left_gripper":  {"min": [-0.5], "delta": [6.5]}
-  }
-}
-```
-
-### 5. Remaining per-dataset config fields
-
-In `configs/data/custom.yaml`, also set per dataset id: `dataset_fps` (used for minimum-length
-filtering and action-frame sampling) and `dataset_image_size` (`[width, height]`). If your dataset
-has a different action dimensionality than the shipped example, update `processor.action_output_dim`
-/ `processor.proprio_output_dim` and the corresponding `action_dim` in your model config to match.
+`wam/` specifically **requires** the action/joint trajectory (`episode_001.json`) and text
+instruction (`instruction.txt`/`instruction.pt`) fields described there — see
+[§6 of `docs/data_format.md`](../docs/data_format.md#6-per-module-differences) for the exact
+per-module requirements. Also set, per dataset id in `configs/data/custom.yaml`: `dataset_fps`
+(minimum-length filtering and action-frame sampling) and `dataset_image_size` (`[width, height]`).
+If your dataset has a different action dimensionality than the shipped example, update
+`processor.action_output_dim` / `processor.proprio_output_dim` and the corresponding `action_dim`
+in your model config to match.
 
 ## Training
 

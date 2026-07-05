@@ -18,7 +18,7 @@ HOST/
 ├── wam/          # Self-grounded prediction: dual-expert video/action diffusion model
 ├── alignment/    # Target coupling: TCC + Smooth DTW video alignment training
 ├── coupling/     # Reserved, not yet populated
-└── docs/         # Reserved for future paper-mapping documentation
+└── docs/         # data_format.md (shared dataset schema); reserved for future paper-mapping docs
 ```
 
 Each module is self-contained with its own environment, training scripts, and README:
@@ -26,8 +26,9 @@ Each module is self-contained with its own environment, training scripts, and RE
 - [`wam/README.md`](./wam/README.md) ([中文](./wam/README_zh.md))
 - [`alignment/README.md`](./alignment/README.md)
 
-Both modules' shipped configs reference this team's internal cluster data paths; see each
-module's own README for the exact data format required to train on your own data, and
+Both modules' shipped configs reference this team's internal cluster data paths, and consume the
+**same on-disk data format** — see [`docs/data_format.md`](./docs/data_format.md) for the full
+schema required to train on your own data, and
 [`OPEN_SOURCE_PATH_TODOS.md`](./OPEN_SOURCE_PATH_TODOS.md) for the current status of making every
 remaining internal path configurable.
 

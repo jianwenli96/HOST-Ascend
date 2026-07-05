@@ -81,86 +81,17 @@ python scripts/preprocess_action_dit_backbone.py \
 
 ## 数据准备
 
-训练时每个数据集需要三样东西：**视频路径列表**、**相机映射**、**关节/动作归一化映射**。仓库自带的
-配置（`configs/data/custom*.yaml`）指向的是内部集群路径 —— 请将 `data_path` /
-`cam_mapping_dir` / `joint_action_mapping_dir` 替换成你自己的数据，格式如下。
+`wam/` 和 `alignment/` 共用同一套磁盘数据规范 —— 完整的、唯一权威的格式说明见仓库根目录的
+[`docs/data_format.md`](../docs/data_format.md)（视频路径列表、episode 目录结构、相机映射、
+关节/动作归一化）。仓库自带的配置（`configs/data/custom*.yaml`）指向的是内部集群路径 —— 请将
+`data_path` / `cam_mapping_dir` / `joint_action_mapping_dir` 替换成你自己按该格式准备的数据。
 
-### 1. 视频路径列表 —— `{dataset_id}_video_paths.json`
-
-一个 JSON 数组，元素是每条 episode 的目录路径。dataset id 取自文件名（如
-`10042_video_paths.json` → dataset id 为 `"10042"`），并作为查找相机映射、关节/动作映射、
-`dataset_fps`/`dataset_image_size` 等配置字典的 key。
-
-```json
-["/data/episodes/task_a/episode_001", "/data/episodes/task_a/episode_002"]
-```
-
-`exclude_episode_json`（数据配置中的可选字段）格式相同，用于从训练中排除指定 episode。
-
-### 2. Episode 目录内容
-
-```text
-episode_001/
-├── episode_001.json     # 动作/关节轨迹 —— 若启用 actions/joints 则必需
-├── instruction.txt      # 纯文本任务指令 —— 必需
-├── instruction.pt       # 预计算的 T5 文本 embedding {"context": [L,4096], "mask": [L]}
-├── info_dtw.json        # {"aligned_progress": {"<frame_idx>": <0..1>, ...}} —— 可选
-├── task_paths.json      # {"same": ["/data/episodes/task_a/episode_002", ...]} —— 同任务的其他 episode
-├── images/              # 一个相机视角的帧序列：0.jpg, 1.jpg, ...
-└── gripper_images/      # 第二个相机视角的帧序列（若为双视角）
-```
-
-也支持用视频文件（`{view}.mp4`）代替帧序列子目录。帧数必须与 `episode_001.json` 中 `"data"`
-数组的条目数一致 —— 不会做静默截断。
-
-`episode_001.json`（动作/关节轨迹）：
-
-```json
-{
-  "data": [
-    {"follow_left_position": [x, y, z], "follow_left_rotation": [r, p, y], "follow_left_gripper": g,
-     "follow_right_position": [x, y, z], "follow_right_rotation": [r, p, y], "follow_right_gripper": g},
-    "... 每帧一条 ..."
-  ]
-}
-```
-
-旋转量为 `[roll, pitch, yaw]` 欧拉角三元组；当 `use_6d_rotation: true` 时，加载过程中会转换为
-6D 旋转矩阵表示。
-
-### 3. 相机映射 —— `{cam_mapping_dir}/{dataset_id}_cam_mapping.json`
-
-将每个任务目录（episode 目录的上一级）映射到其磁盘上的相机/视角名有序列表：
-
-```json
-{"/data/episodes/task_a": ["images", "gripper_images"]}
-```
-
-`num_view_probs`（如 `'{"2": 1.0}'`）决定每个 batch 从列出的视角中采样几个。
-
-### 4. 关节/动作归一化 —— `{joint_action_mapping_dir}/{dataset_id}_joint_action_mapping.json`
-
-声明从 `episode_001.json` 读取哪些字段，以及各维度的 min/delta，用于将动作归一化到 `[-1, 1]`
-（`norm = 2*(raw - min)/delta - 1`）：
-
-```json
-{
-  "action_keys": ["follow_left_position", "follow_left_rotation", "follow_left_gripper",
-                   "follow_right_position", "follow_right_rotation", "follow_right_gripper"],
-  "joint_keys": ["left_rotation", "right_rotation", "left_position", "right_position"],
-  "norm_min_delta": {
-    "follow_left_position": {"min": [-0.08, -0.08, -0.08], "delta": [0.16, 0.16, 0.16]},
-    "follow_left_rotation": {"min": [-0.30, -0.30, -0.30], "delta": [0.60, 0.60, 0.60]},
-    "follow_left_gripper":  {"min": [-0.5], "delta": [6.5]}
-  }
-}
-```
-
-### 5. 其余按数据集配置的字段
-
-在 `configs/data/custom.yaml` 中还需按 dataset id 设置：`dataset_fps`（用于最短长度过滤与动作
-帧采样）和 `dataset_image_size`（`[width, height]`）。如果你的数据集动作维度与示例不同，需同步
-更新 `processor.action_output_dim` / `processor.proprio_output_dim`，以及模型配置里对应的
+`wam/` 具体要求 **必须** 提供动作/关节轨迹（`episode_001.json`）和文本指令
+（`instruction.txt`/`instruction.pt`）字段 —— 各模块的具体要求差异见
+[`docs/data_format.md` 第 6 节](../docs/data_format.md#6-per-module-differences)。此外还需在
+`configs/data/custom.yaml` 中按 dataset id 设置：`dataset_fps`（用于最短长度过滤与动作帧采样）
+和 `dataset_image_size`（`[width, height]`）。如果你的数据集动作维度与示例不同，需同步更新
+`processor.action_output_dim` / `processor.proprio_output_dim`，以及模型配置里对应的
 `action_dim`。
 
 ## 训练

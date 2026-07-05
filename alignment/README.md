@@ -46,53 +46,22 @@ image/video processor stack.
 
 ## Data Preparation
 
-Training reads a **video-paths list**, each entry's episode directory, and (optionally) a
-**camera mapping** — the shipped script points at this team's internal cluster paths
-(`--video_paths /open_data/cgy/processed_data/video_paths_basket/clean/10042_video_paths.json`).
-Replace this with your own data in the format below. This module needs only video frames plus
-task grouping — no robot actions/joint data are required unless you enable joint conditioning
-(`CONFIG.JOINTS.USE_JOINTS`).
+`alignment/` and `wam/` consume the same on-disk data convention — see
+[`docs/data_format.md`](../docs/data_format.md) at the repo root for the full, single-source-of-truth
+schema (video-paths list, episode directory layout, camera mapping, joint/action normalization).
+The shipped script points at this team's internal cluster paths
+(`--video_paths /open_data/cgy/processed_data/video_paths_basket/clean/10042_video_paths.json`) —
+replace it with your own data in that format.
 
-### 1. Video paths list — `{dataset_id}_video_paths.json`
+`alignment/` specifically needs only video frames plus task grouping (`task_paths.json`) — no
+robot actions/joint data are required unless you enable joint conditioning
+(`CONFIG.JOINTS.USE_JOINTS`); see
+[§6 of `docs/data_format.md`](../docs/data_format.md#6-per-module-differences) for the exact
+per-module requirements. Video-paths entries can also address a segment of a longer recording as
+`path:segment_id:start-end` (inclusive frame range) — see `alignment/SEGMENTED_VIDEO_FORMAT.md`
+for that case.
 
-A JSON array of episode paths, passed via `--video_paths` (comma-separated if using multiple
-files). The dataset id is taken from the filename and used to look up camera mappings /
-per-dataset config.
-
-```json
-["/data/episodes/task_a/episode_001", "/data/episodes/task_a/episode_002"]
-```
-
-Each entry can also address a segment of a longer recording as `path:segment_id:start-end`
-(inclusive frame range) — see `alignment/SEGMENTED_VIDEO_FORMAT.md` for the segmented-recording
-case.
-
-### 2. Episode directory contents
-
-```text
-episode_001/
-├── images/              # frame sequence: 0.jpg, 1.jpg, ...     (or images.mp4)
-├── instruction.txt      # plain-text task instruction — optional
-└── task_paths.json      # {"same": ["/data/episodes/task_a/episode_002", ...]}
-```
-
-`task_paths.json` lists peer episodes of the *same task* — during training, one is sampled as the
-"Reference" video that the "Main" video's chunks are aligned against (the `"same"` pool is
-preferred; a lower-quality `"100-95"` pool is used as fallback if present). Without it, training
-falls back to self-alignment (Main and Reference are the same episode).
-
-### 3. Camera mapping (optional, multi-view only) — `{cam_mapping_dir}/{dataset_id}_cam_mapping.json`
-
-Only needed if an episode has more than one camera view:
-
-```json
-{"/data/episodes/task_a": ["images", "gripper_images"]}
-```
-
-Set `CONFIG.DATA.MULTI_VIEW_DATASETS` / `CONFIG.DATA.NUM_VIEWS` in `config.py` accordingly. With a
-single view, this file can be omitted (the first available camera / `images/` subdir is used).
-
-### 4. Relevant `config.py` fields
+Relevant `config.py` fields:
 
 ```python
 CONFIG.DATA.NUM_STEPS = 3            # frames per chunk
