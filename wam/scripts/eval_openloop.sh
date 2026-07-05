@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# FastWAM Open-Loop Evaluation
+# SelfGroundedPredictor Open-Loop Evaluation
 # Usage: bash scripts/eval_openloop.sh
 
 set -euo pipefail
@@ -45,7 +45,7 @@ CMD+=(--task_video_static_threshold_ratio "${TASK_VIDEO_STATIC_THRESHOLD_RATIO}"
 
 # ── Launch ──────────────────────────────────────────────────────────────
 echo "============================================================"
-echo "FastWAM Open-Loop Evaluation"
+echo "SelfGroundedPredictor Open-Loop Evaluation"
 echo "  checkpoint:  ${CHECKPOINT_DIR}"
 echo "  step:        ${CHECKPOINT_STEP:-latest}"
 echo "  data:        ${EVAL_DATA_PATH}"

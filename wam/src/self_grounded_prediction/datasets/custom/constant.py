@@ -207,7 +207,7 @@ X2_NORM = {
     },
 }
 
-# Per-site toggles for Emu3SFTDataset logging.warning (train/datasets.py). True = emit warning.
+# Per-site toggles for CustomDataset logging.warning (train/datasets.py). True = emit warning.
 DATA_WARNING_FLAGS = {
     "missing_action_key": False,
     "no_active_action_fields": False,

@@ -73,11 +73,11 @@ def create_wan22_model(
     )
 
 
-# NOTE: This function instantiates FastWAMJoint (NOT FastWAM base).
-# FastWAMJoint overrides _build_mot_attention_mask so that action tokens attend
-# to ALL video tokens in self-attention (FastWAM base only allows first frame).
-# All model configs with _target_: fastwam.runtime.create_fastwam_joint go through here.
-def create_fastwam_joint(
+# NOTE: This function instantiates SelfGroundedPredictorJoint (NOT SelfGroundedPredictor base).
+# SelfGroundedPredictorJoint overrides _build_mot_attention_mask so that action tokens attend
+# to ALL video tokens in self-attention (SelfGroundedPredictor base only allows first frame).
+# All model configs with _target_: self_grounded_prediction.runtime.create_self_grounded_predictor go through here.
+def create_self_grounded_predictor(
     model_id: str,
     tokenizer_model_id: str,
     video_dit_config,
@@ -112,7 +112,7 @@ def create_fastwam_joint(
     action_self_attn_to_task_video: bool = False,
     visual_encoder=None,
 ):
-    from .models.wan22.fastwam_joint import FastWAMJoint
+    from .models.wan22.self_grounded_predictor_joint import SelfGroundedPredictorJoint
 
     if isinstance(visual_encoder, DictConfig):
         visual_encoder = OmegaConf.to_container(visual_encoder, resolve=True)
@@ -146,7 +146,7 @@ def create_fastwam_joint(
     if isinstance(action_scheduler, DictConfig):
         action_scheduler = OmegaConf.to_container(action_scheduler, resolve=True)
     if action_scheduler is None:
-        raise ValueError("`action_scheduler` is required for FastWAM.")
+        raise ValueError("`action_scheduler` is required for SelfGroundedPredictor.")
     if not isinstance(action_scheduler, dict):
         raise ValueError(f"`action_scheduler` must be dict-like, got {type(action_scheduler)}")
     required_action_scheduler_keys = {"train_shift", "infer_shift", "num_train_timesteps"}
@@ -171,7 +171,7 @@ def create_fastwam_joint(
     if not isinstance(progress_scheduler, dict):
         raise ValueError(f"`progress_scheduler` must be dict-like, got {type(progress_scheduler)}")
 
-    return FastWAMJoint.from_wan22_pretrained(
+    return SelfGroundedPredictorJoint.from_wan22_pretrained(
         device=device,
         torch_dtype=model_dtype,
         model_id=model_id,

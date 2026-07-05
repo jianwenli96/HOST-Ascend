@@ -1,5 +1,5 @@
 """
-FastWAM open-loop evaluation script.
+SelfGroundedPredictor open-loop evaluation script.
 
 Chunk-based evaluation: for each episode, iterate through chunks of
 action_frames steps, call infer_real(), compare predicted actions against
@@ -37,10 +37,10 @@ _eval_dir = osp.dirname(__file__)
 if _eval_dir not in sys.path:
     sys.path.insert(0, _eval_dir)
 
-from eval_dataset import FastWAMEvalDataset
-from fastwam_eval import FastWAMEval
+from eval_dataset import SelfGroundedPredictorEvalDataset
+from self_grounded_predictor_eval import SelfGroundedPredictorEval
 from action_utils import build_action_col_map, decode_6d_to_euler
-from fastwam.datasets.custom.path_transforms_config import get_path_transforms
+from self_grounded_prediction.datasets.custom.path_transforms_config import get_path_transforms
 
 logger = logging.getLogger(__name__)
 
@@ -129,8 +129,8 @@ def aggregate_metrics(all_metrics: list) -> dict:
 # ------------------------------------------------------------------
 
 def evaluate(
-    wrapper: FastWAMEval,
-    dataset: FastWAMEvalDataset,
+    wrapper: SelfGroundedPredictorEval,
+    dataset: SelfGroundedPredictorEvalDataset,
     log_dir: str,
     *,
     max_episodes: Optional[int] = None,
@@ -403,7 +403,7 @@ def evaluate(
 # ------------------------------------------------------------------
 
 def parse_args():
-    p = argparse.ArgumentParser(description="FastWAM open-loop evaluation")
+    p = argparse.ArgumentParser(description="SelfGroundedPredictor open-loop evaluation")
     p.add_argument("--checkpoint_dir", required=True,
                     help="Training output dir with config.yaml + checkpoints/")
     p.add_argument("--eval_data_path", required=True,
@@ -468,7 +468,7 @@ def main():
     _static_grip_thresh = float(getattr(_dcfg, "static_gripper_threshold", 0.01))
 
     logger.info("Building model wrapper...")
-    wrapper = FastWAMEval(
+    wrapper = SelfGroundedPredictorEval(
         checkpoint_dir=args.checkpoint_dir,
         dataset_name=args.dataset_name,
         views=args.views,
@@ -484,7 +484,7 @@ def main():
     )
 
     logger.info("Building evaluation dataset (remove_static_frames=%s)...", _remove_static)
-    dataset = FastWAMEvalDataset(
+    dataset = SelfGroundedPredictorEvalDataset(
         data_path=args.eval_data_path,
         views=args.views,
         joint_action_mapping_dir=wrapper.joint_action_mapping_dir,

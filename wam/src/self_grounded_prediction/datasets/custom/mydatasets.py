@@ -120,12 +120,12 @@ ACTION_DOWNSAMPLE_FACTOR: dict = {
     '10058':               1,
 }
 
-# Simplified token types for FastWAM (task video vs agent image distinction)
+# Simplified token types for SelfGroundedPredictor (task video vs agent image distinction)
 TOKEN_TYPE_PAD = 0
 TOKEN_TYPE_TASK_VIDEO = 1
 TOKEN_TYPE_AGENT_IMAGE = 2
 
-class Emu3SFTDataset(Dataset):
+class CustomDataset(Dataset):
     debug_count = 0
 
     def __init__(self, args: "DataArguments", tokenizer=None):
@@ -183,7 +183,7 @@ class Emu3SFTDataset(Dataset):
             ]
             excluded_count = original_len - len(self.data)
             logging.warning(
-                "[Emu3SFTDataset] exclude_episode_json: excluded %d / %d episodes from %s",
+                "[CustomDataset] exclude_episode_json: excluded %d / %d episodes from %s",
                 excluded_count, original_len, exclude_json
             )
 
@@ -298,7 +298,7 @@ class Emu3SFTDataset(Dataset):
         self.use_indicator_positive = bool(getattr(args, "use_indicator_positive", False))
         if self.use_indicator_prompt:
             raise NotImplementedError(
-                "use_indicator_prompt is not yet supported in FastWAM. "
+                "use_indicator_prompt is not yet supported in SelfGroundedPredictor. "
                 "Set use_indicator_prompt=False."
             )
 
@@ -333,7 +333,7 @@ class Emu3SFTDataset(Dataset):
             self.dataset_image_size[str(k)] = (w, h)  # store as (W, H) for PIL
         self.use_augmentation = getattr(args, 'use_augmentation', False)
 
-        # FastWAM video params
+        # SelfGroundedPredictor video params
         self.action_video_freq_ratio = getattr(args, 'action_video_freq_ratio', 4)
         self.max_action_len = getattr(args, 'max_action_len', None)
         self.context_len = getattr(args, 'context_len', 128)
@@ -3076,7 +3076,7 @@ class Emu3SFTDataset(Dataset):
                 frame_end_progress = None
                 resized_task_views = []
 
-        # ===== Build FastWAM output =====
+        # ===== Build SelfGroundedPredictor output =====
 
         # Agent video tensor
         agent_video = self._frames_to_video_tensor(resized_views)  # [C, T_video, H, W]
@@ -3297,17 +3297,17 @@ class _HydraArgs:
             setattr(self, k, v)
 
 
-def build_custom_dataset(**kwargs) -> Emu3SFTDataset:
+def build_custom_dataset(**kwargs) -> CustomDataset:
     """Factory function for Hydra instantiate().
 
     Converts keyword arguments from the YAML config into an args object
-    that Emu3SFTDataset.__init__ expects.
+    that CustomDataset.__init__ expects.
 
     Usage in YAML:
-        _target_: fastwam.datasets.custom.mydatasets.build_custom_dataset
+        _target_: self_grounded_prediction.datasets.custom.mydatasets.build_custom_dataset
         data_path: ...
         frames: 2
         ...
     """
     args = _HydraArgs(**kwargs)
-    return Emu3SFTDataset(args)
+    return CustomDataset(args)

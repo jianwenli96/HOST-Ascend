@@ -1,11 +1,11 @@
 """
-FastWAM model wrapper for real open-loop evaluation.
+SelfGroundedPredictor model wrapper for real open-loop evaluation.
 
 Loads model from checkpoint_dir/config.yaml + checkpoint .pt file.
 All config params (cam_mapping, normalization, image pixels, etc.) are read
 from the saved training config — only a few essential params are external.
 
-Design mirrors UniVLA2 EmuVLARealModel but adapted for FastWAM's
+Design mirrors UniVLA2 EmuVLARealModel but adapted for SelfGroundedPredictor's
 diffusion-based infer_joint interface (pixel tensors, not VQ tokens).
 """
 from __future__ import annotations
@@ -41,8 +41,8 @@ from action_utils import (
     load_joint_norm_min_delta,
     relative_to_absolute,
 )
-from fastwam.datasets.custom.mydatasets import Emu3SFTDataset
-from fastwam.utils.video_io import save_mp4
+from self_grounded_prediction.datasets.custom.mydatasets import CustomDataset
+from self_grounded_prediction.utils.video_io import save_mp4
 from scipy.spatial.transform import Rotation as _SciRotation
 from action_viz import save_action_plot
 
@@ -72,14 +72,14 @@ def _update_latest_symlink(target_path: str, latest_name: str):
     os.replace(tmp, latest)
 
 
-class FastWAMEval:
+class SelfGroundedPredictorEval:
     """Stateful model wrapper for real open-loop evaluation.
 
     Loads model + normalization from a training checkpoint directory.
     Provides infer_real() as the single entry point for raw sensor data → action.
 
     Usage:
-        wrapper = FastWAMEval(checkpoint_dir, dataset_name='10042', views=[...])
+        wrapper = SelfGroundedPredictorEval(checkpoint_dir, dataset_name='10042', views=[...])
         wrapper.set_task_video(episode_dir)   # once per task video episode
         for step in range(num_steps):
             result = wrapper.infer_real(obs, joints, instruction)
@@ -193,7 +193,7 @@ class FastWAMEval:
         self.n_per_seg = max(4, ((_raw + 3) // 4) * 4) + 1  # ∈ {5, 9, 13, ...}
         self.frames_per_seg = self.n_per_seg - 1  # e.g. 4
         logger.info(
-            "[FastWAMEval] action_frames=%d from dataset_fps[%s], n_per_seg=%d",
+            "[SelfGroundedPredictorEval] action_frames=%d from dataset_fps[%s], n_per_seg=%d",
             self.action_frames, dataset_name, self.n_per_seg,
         )
 
@@ -205,7 +205,7 @@ class FastWAMEval:
                 self._static_action_keys = next(iter(json.load(_f).values()))["action_keys"]
 
         logger.info(
-            "[FastWAMEval] Config: action_dim=%d, proprio_dim=%d, use_6d_rotation=%s, "
+            "[SelfGroundedPredictorEval] Config: action_dim=%d, proprio_dim=%d, use_6d_rotation=%s, "
             "action_frames=%d, max_action_len=%d, frames=%d",
             self.action_dim, self.proprio_dim, self.use_6d_rotation,
             self.action_frames, self.max_action_len, self.frames,
@@ -215,7 +215,7 @@ class FastWAMEval:
         # Override load_text_encoder=true for eval (training uses false to save memory)
         model_cfg = OmegaConf.to_container(cfg.model, resolve=True)
         model_cfg["load_text_encoder"] = True
-        logger.info("[FastWAMEval] Building model (load_text_encoder=True for eval)...")
+        logger.info("[SelfGroundedPredictorEval] Building model (load_text_encoder=True for eval)...")
         self.model = instantiate(
             model_cfg,
             model_dtype=torch.bfloat16,
@@ -224,7 +224,7 @@ class FastWAMEval:
 
         # ---- Load checkpoint weights ----
         ckpt_path = self._find_checkpoint(checkpoint_dir, checkpoint_step)
-        logger.info("[FastWAMEval] Loading checkpoint: %s", ckpt_path)
+        logger.info("[SelfGroundedPredictorEval] Loading checkpoint: %s", ckpt_path)
         self.model.load_checkpoint(ckpt_path)
         self.model.eval()
 
@@ -244,7 +244,7 @@ class FastWAMEval:
             dataset_name, self.joint_action_mapping_dir
         )
         logger.info(
-            "[FastWAMEval] Norm loaded: action_dim=%d, joint_dim=%s, joint_keys=%s",
+            "[SelfGroundedPredictorEval] Norm loaded: action_dim=%d, joint_dim=%s, joint_keys=%s",
             len(self.norm_low),
             len(self.j_nm) if self.j_nm is not None else "None",
             self._joint_keys,
@@ -272,7 +272,7 @@ class FastWAMEval:
         self._viz_executor = ThreadPoolExecutor(max_workers=2)
         self._viz_futures: list[Future] = []
 
-        logger.info("[FastWAMEval] Initialized successfully.")
+        logger.info("[SelfGroundedPredictorEval] Initialized successfully.")
 
     # ------------------------------------------------------------------
     # Checkpoint discovery
@@ -415,12 +415,12 @@ class FastWAMEval:
             if osp.exists(json_path):
                 with open(json_path) as _f:
                     entries = json.load(_f)["data"]
-                raw_actions, col_map, active_keys = Emu3SFTDataset._assemble_raw_actions(
+                raw_actions, col_map, active_keys = CustomDataset._assemble_raw_actions(
                     entries, self._static_action_keys, self.use_6d_rotation,
                 )
                 if raw_actions is not None:
                     _r = self.task_video_static_threshold_ratio
-                    active_indices = Emu3SFTDataset._get_active_indices(
+                    active_indices = CustomDataset._get_active_indices(
                         raw_actions, active_keys, col_map,
                         self.static_rot_threshold * _r,
                         self.static_trans_threshold * _r,
@@ -551,7 +551,7 @@ class FastWAMEval:
     def _preprocess_image(self, observations: dict) -> torch.Tensor:
         """Convert raw observation images to model input tensor.
 
-        FastWAM expects input_image as [1, 3, H_total, W] in [-1, 1].
+        SelfGroundedPredictor expects input_image as [1, 3, H_total, W] in [-1, 1].
         Multi-view images are concatenated along H (same as training).
 
         Args:

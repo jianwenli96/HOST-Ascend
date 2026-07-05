@@ -285,7 +285,7 @@ class BaseModel(nn.Module):
                     if is_cls is not None:
                         cls_indices = torch.where(is_cls[b])[0]
                         # The first few CLS tokens might belong to the align video if it was processed similarly,
-                        # but in TCCCollator, only chunk_imgs (groups) have <|file_sep|> after them.
+                        # but in AlignmentCollator, only chunk_imgs (groups) have <|file_sep|> after them.
                         # The initial video_imgs (align) does NOT have <|file_sep|> after it in content.
                         
                         for g in range(min(len(cls_indices), n_m + n_r)):
@@ -664,9 +664,9 @@ class LinearEmbedder(nn.Module):
             
         return x
 
-class TCCTransformerGate(nn.Module):
+class AttentionGate(nn.Module):
     def __init__(self, in_channels, d_model=256, nhead=8, num_layers=4, dim_feedforward=512):
-        super(TCCTransformerGate, self).__init__()
+        super(AttentionGate, self).__init__()
         # Project high-dim Qwen tokens (e.g. 1536) to a smaller d_model (256) for efficiency
         self.compress = nn.Linear(in_channels, d_model)
         
@@ -743,7 +743,7 @@ def get_model():
             gate_d_model = CONFIG.ALIGNMENT.GATE_HIDDEN_DIM # E.g. 256
             gate_heads = CONFIG.ALIGNMENT.GATE_HEADS
             gate_layers = CONFIG.ALIGNMENT.get('GATE_LAYERS', 1)
-            model['gate'] = TCCTransformerGate(
+            model['gate'] = AttentionGate(
                 in_channels, 
                 d_model=gate_d_model,
                 nhead=gate_heads, 

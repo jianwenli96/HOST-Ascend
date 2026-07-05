@@ -93,7 +93,7 @@ datasets_with_higher_frequency = [
 
 
 
-class TCCCollator:
+class AlignmentCollator:
     def __init__(self, processor=None, mode='train'):
         self.processor = processor
         self.mode = mode
@@ -234,7 +234,7 @@ class TCCCollator:
                         video_frame_groups[video_path] = []
                     video_frame_groups[video_path].append((idx, frame_idx, width, height))
                 except Exception as e:
-                    print(f"[TCCCollator load_imgs] Error parsing video path {p}: {e}")
+                    print(f"[AlignmentCollator load_imgs] Error parsing video path {p}: {e}")
         
         # Phase 2: Batch read video frames
         video_frames_map = {}  # {(video_path, frame_idx): PIL.Image}
@@ -265,10 +265,10 @@ class TCCCollator:
                 del vr
                     
             except Exception as e:
-                print(f"[TCCCollator load_imgs] Error batch reading video {video_path}: {e}")
+                print(f"[AlignmentCollator load_imgs] Error batch reading video {video_path}: {e}")
                 # Fallback: create black images for failed frames
                 for path_idx, frame_idx, _, _ in frame_list:
-                    print(f"[TCCCollator load_imgs] Fallback to black image for {video_path} frame {frame_idx} (Phase 2)")
+                    print(f"[AlignmentCollator load_imgs] Fallback to black image for {video_path} frame {frame_idx} (Phase 2)")
                     video_frames_map[(video_path, frame_idx)] = Image.new(
                         'RGB', (CONFIG.IMAGE_SIZE, CONFIG.IMAGE_SIZE), (0, 0, 0)
                     )
@@ -300,10 +300,10 @@ class TCCCollator:
                     
                     if img is None:
                         # Fallback if not found
-                        print(f"[TCCCollator load_imgs] Fallback to black image for {video_path} frame {frame_idx} (Phase 3: img is None)")
+                        print(f"[AlignmentCollator load_imgs] Fallback to black image for {video_path} frame {frame_idx} (Phase 3: img is None)")
                         img = Image.new('RGB', (CONFIG.IMAGE_SIZE, CONFIG.IMAGE_SIZE), (0, 0, 0))
                 except Exception as e:
-                    print(f"[TCCCollator load_imgs] Error retrieving video frame {p}: {e}")
+                    print(f"[AlignmentCollator load_imgs] Error retrieving video frame {p}: {e}")
                     img = Image.new('RGB', (CONFIG.IMAGE_SIZE, CONFIG.IMAGE_SIZE), (0, 0, 0))
             
             elif isinstance(p, Image.Image):
@@ -345,10 +345,10 @@ class TCCCollator:
                 continue
             if num_frames >= m * chunk_len:
                 if m != target_M:
-                    print(f"[TCCCollator Eval] Warning: video too short for target M={target_M} "
+                    print(f"[AlignmentCollator Eval] Warning: video too short for target M={target_M} "
                           f"(frames={num_frames}, need {target_M * chunk_len}). Falling back to M={m}.")
                 return m
-        print(f"[TCCCollator Eval] Warning: video too short even for M=1 "
+        print(f"[AlignmentCollator Eval] Warning: video too short even for M=1 "
               f"(frames={num_frames}, need {chunk_len}). Forcing M=1.")
         return 1
 
@@ -934,7 +934,7 @@ class TCCCollator:
 
         return collated_batch
 
-class LiberoDataset(Dataset):
+class AlignmentDataset(Dataset):
     def __init__(self, mode='train', transform=None, video_paths_json=None, processor=None):
         self.mode = mode
         self.transform = transform
@@ -1140,7 +1140,7 @@ class LiberoDataset(Dataset):
                 )
 
         dataset_type = "pickle" if is_pickle else "json"
-        print(f"LiberoDataset initialized with {len(self.video_paths)} videos and views: {self.views} (source: {dataset_type})")
+        print(f"AlignmentDataset initialized with {len(self.video_paths)} videos and views: {self.views} (source: {dataset_type})")
         
     def __len__(self):
         return len(self.video_paths) * len(self.views)
@@ -1790,7 +1790,7 @@ class LiberoDataset(Dataset):
         frame_counts = {}
         for v in raw:
             try:
-                cnt = LiberoDataset._get_view_frame_count(video_info, v)
+                cnt = AlignmentDataset._get_view_frame_count(video_info, v)
             except ValueError as exc:
                 logging.warning(
                     f"[cam_mapping] Unreadable video for view {v!r} in episode {ep!r}: {exc}; skipping sample."
@@ -1835,7 +1835,7 @@ class LiberoDataset(Dataset):
             frame_counts = {}
             for v in cam_list_main:
                 try:
-                    cnt = LiberoDataset._get_view_frame_count(ep_info, v)
+                    cnt = AlignmentDataset._get_view_frame_count(ep_info, v)
                 except ValueError as exc:
                     logging.warning(
                         f"[cam_mapping] Unreadable video for view {v!r} in {ep_label} episode {ep_dir!r}: {exc}; skipping sample."
@@ -2514,7 +2514,7 @@ def create_dataset(split, mode, batch_size=None, return_iterator=True, distribut
         
     transform = get_transforms(mode)
     
-    dataset = LiberoDataset(mode=mode, transform=transform, video_paths_json=video_paths_json, processor=processor)
+    dataset = AlignmentDataset(mode=mode, transform=transform, video_paths_json=video_paths_json, processor=processor)
     
     sampler = None
     use_weighted_sampler = (hasattr(dataset, 'weights') and len(dataset.weights) > 0 and mode == 'train')
@@ -2549,7 +2549,7 @@ def create_dataset(split, mode, batch_size=None, return_iterator=True, distribut
              sampler = None 
              shuffle = (mode == 'train')
     
-    collator = TCCCollator(processor=processor, mode=mode)
+    collator = AlignmentCollator(processor=processor, mode=mode)
     
     # Use fewer workers for eval to avoid initialization issues
     num_workers = 12 if mode == 'train' else 12
@@ -2570,7 +2570,7 @@ def create_dataset(split, mode, batch_size=None, return_iterator=True, distribut
         return InfiniteDataLoader(dataloader, sampler=sampler)
     return dataloader
 
-class LiberoVideoDataset(LiberoDataset):
+class AlignmentVideoDataset(AlignmentDataset):
     def __init__(self, mode='eval', transform=None, video_paths_json=None, processor=None, chunk_size=None):
         self.pickle_data = None
         self.expert_data = None
@@ -2951,7 +2951,7 @@ class LiberoVideoDataset(LiberoDataset):
             ctx_indices = np.clip(ctx_indices, 0, len(files) - 1)
             for ctx_idx in ctx_indices:
                 if self.pickle_data is not None:
-                    # Store numpy array for TCCCollator.load_imgs
+                    # Store numpy array for AlignmentCollator.load_imgs
                     frame_paths.append(files[ctx_idx])
                 else:
                     frame_paths.append(files[ctx_idx])
@@ -3037,7 +3037,7 @@ class LiberoVideoDataset(LiberoDataset):
             'chunk_idx': chunk_info['chunk_idx'],
             'global_indices': torch.tensor(global_indices),
             'candidate_global_indices': torch.tensor(candidate_indices),
-            'ref_chosen_steps': torch.tensor(candidate_indices), # Expose for TCCCollator dustbin detection
+            'ref_chosen_steps': torch.tensor(candidate_indices), # Expose for AlignmentCollator dustbin detection
             # For Qwen
             'frame_paths': frame_paths,
             'ref_frame_paths': candidate_frame_paths, # Use ref_frame_paths key for collator compatibility
@@ -3050,11 +3050,11 @@ class LiberoVideoDataset(LiberoDataset):
 
 def create_one_epoch_dataset(split, mode, batch_size=1, return_iterator=True, video_paths_json=None, processor=None, chunk_size=None):
     transform = get_transforms(mode)
-    dataset = LiberoVideoDataset(mode=mode, transform=transform, video_paths_json=video_paths_json, processor=processor, chunk_size=chunk_size)
+    dataset = AlignmentVideoDataset(mode=mode, transform=transform, video_paths_json=video_paths_json, processor=processor, chunk_size=chunk_size)
     
     collator = None
     if processor is not None:
-        collator = TCCCollator(processor=processor, mode=mode)
+        collator = AlignmentCollator(processor=processor, mode=mode)
         
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=4, collate_fn=collator)
     

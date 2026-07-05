@@ -585,7 +585,7 @@ def get_embeddings_dataset(model, iterator, keep_data=False, keep_labels=True, m
     
     with torch.no_grad():
         for data in iterator:
-            # data is from DataLoader with TCCCollator
+            # data is from DataLoader with AlignmentCollator
             # If batch_size > 1, some fields are lists, some are shifted into qwen_input
             
             # Check for max_embs limit (based on unique video names seen so far)
@@ -626,7 +626,7 @@ def get_embeddings_dataset(model, iterator, keep_data=False, keep_labels=True, m
             embs_np = embs.cpu().numpy()
             
             # Extract Batch Info
-            # In TCCCollator, each sample in batch is split into 2 rows: [Main_Row, Ref_Row]
+            # In AlignmentCollator, each sample in batch is split into 2 rows: [Main_Row, Ref_Row]
             # So batch_inputs effectively has 2 * len(data['video_name']) entries.
             # total_frames is sum of these rows.
             

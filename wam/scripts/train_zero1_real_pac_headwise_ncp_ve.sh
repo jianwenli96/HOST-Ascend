@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Train FastWAM with visual encoder + noisy clean progress token (pac_headwise + ncp + DINOv2)
+# Train SelfGroundedPredictor with visual encoder + noisy clean progress token (pac_headwise + ncp + DINOv2)
 # Usage: bash scripts/train_zero1_real_pac_headwise_ncp_ve.sh [hydra_overrides...]
 
 set -euo pipefail
@@ -154,6 +154,6 @@ accelerate launch \
   "wandb.enabled=true" \
   "wandb.name=${TASK_FULLNAME}_${RUN_ID}" \
   "wandb.project=FAST-WAM" \
-  "model=fastwam_joint_cross_attn_ve" \
+  "model=self_grounded_predictor_joint_cross_attn_ve" \
   "task=${TASK_BASENAME}" \
   "${EXTRA_ARGS[@]}"

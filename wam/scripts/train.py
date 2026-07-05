@@ -5,8 +5,8 @@ _ensure_project_src.ensure()
 import hydra
 from omegaconf import DictConfig
 
-from fastwam.runtime import run_training
-from fastwam.utils.config_resolvers import register_default_resolvers
+from self_grounded_prediction.runtime import run_training
+from self_grounded_prediction.utils.config_resolvers import register_default_resolvers
 
 register_default_resolvers()
 

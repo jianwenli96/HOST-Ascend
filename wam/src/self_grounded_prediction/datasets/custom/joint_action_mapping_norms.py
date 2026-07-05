@@ -31,7 +31,7 @@ def load_joint_action_mapping_cache(joint_action_mapping_dir: str) -> Dict[str, 
     """Eagerly load all *_joint_action_mapping.json files.
 
     Returns:
-        {dataset_name: mapping_dict}  (same as Emu3SFTDataset._joint_action_mapping_cache)
+        {dataset_name: mapping_dict}  (same as CustomDataset._joint_action_mapping_cache)
     """
     cache: Dict[str, Any] = {}
     if not osp.isdir(joint_action_mapping_dir):

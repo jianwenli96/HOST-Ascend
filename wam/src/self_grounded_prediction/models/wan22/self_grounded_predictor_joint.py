@@ -2,23 +2,23 @@ from typing import Any, Optional
 
 import torch
 
-from fastwam.utils.logging_config import get_logger
+from self_grounded_prediction.utils.logging_config import get_logger
 
-from .fastwam import FastWAM
+from .self_grounded_predictor import SelfGroundedPredictor
 
 logger = get_logger(__name__)
 
 
-class FastWAMJoint(FastWAM):
-    """FastWAM variant where action attends to all video latent tokens.
+class SelfGroundedPredictorJoint(SelfGroundedPredictor):
+    """SelfGroundedPredictor variant where action attends to all video latent tokens.
 
-    IMPORTANT — THIS IS THE CLASS USED IN PRODUCTION (via create_fastwam_joint in runtime.py).
-    All configs with _target_: fastwam.runtime.create_fastwam_joint instantiate THIS class,
-    not the base FastWAM class.
+    IMPORTANT — THIS IS THE CLASS USED IN PRODUCTION (via create_self_grounded_predictor in runtime.py).
+    All configs with _target_: self_grounded_prediction.runtime.create_self_grounded_predictor instantiate THIS class,
+    not the base SelfGroundedPredictor class.
 
-    Key difference from FastWAM (base):
-        FastWAM._build_mot_attention_mask:      action → first frame only
-        FastWAMJoint._build_mot_attention_mask: action → ALL video tokens (this class)
+    Key difference from SelfGroundedPredictor (base):
+        SelfGroundedPredictor._build_mot_attention_mask:      action → first frame only
+        SelfGroundedPredictorJoint._build_mot_attention_mask: action → ALL video tokens (this class)
 
     Attention mask layout for [task_video | video | action]:
         task_video → task_video:  full
@@ -26,7 +26,7 @@ class FastWAMJoint(FastWAM):
         video      → task_video:  allowed (condition on task)
         video      → video:       first_frame_causal (first frame cannot see later frames)
         action     → task_video:  blocked  (action conditions on task via cross-attn, not self-attn)
-        action     → video:       ALL frames (unlike FastWAM base which only allows first frame)
+        action     → video:       ALL frames (unlike SelfGroundedPredictor base which only allows first frame)
         action     → action:      full
     """
 
@@ -35,11 +35,11 @@ class FastWAMJoint(FastWAM):
         video_dit_config = kwargs.get("video_dit_config", None)
         if not isinstance(video_dit_config, dict):
             raise ValueError(
-                "`video_dit_config` must be provided as dict for FastWAMJoint."
+                "`video_dit_config` must be provided as dict for SelfGroundedPredictorJoint."
             )
         if bool(video_dit_config.get("action_conditioned", False)):
             raise ValueError(
-                "FastWAMJoint requires `video_dit_config['action_conditioned']=false`."
+                "SelfGroundedPredictorJoint requires `video_dit_config['action_conditioned']=false`."
             )
         return super().from_wan22_pretrained(**kwargs)
 
@@ -56,7 +56,7 @@ class FastWAMJoint(FastWAM):
     ) -> torch.Tensor:
         """Attention mask for [progress | task_video | video | noisy_group | action].
 
-        FastWAMJoint: action attends to ALL video tokens (not just first frame).
+        SelfGroundedPredictorJoint: action attends to ALL video tokens (not just first frame).
 
         When noisy_group_seq_len > 0, an isolated noisy group is inserted between
         agent video and action. The noisy group self-attends (full) but is completely
@@ -122,7 +122,7 @@ class FastWAMJoint(FastWAM):
         # action -> task_video: allowed when action_self_attn_to_task_video=True
         if self.action_self_attn_to_task_video and tv_end > p_end:
             mask[a_start:, p_end:tv_end] = True
-        # action -> full video (FastWAMJoint: attend to ALL video)
+        # action -> full video (SelfGroundedPredictorJoint: attend to ALL video)
         mask[a_start:, tv_end:v_end] = True
         # action -> noisy_group: blocked (default False)
         # action -> action: full
@@ -155,7 +155,7 @@ class FastWAMJoint(FastWAM):
     ) -> dict[str, Any]:
         if test_action_with_infer_action:
             logger.warning(
-                "`FastWAMJoint.infer_joint` ignores `test_action_with_infer_action=True` "
+                "`SelfGroundedPredictorJoint.infer_joint` ignores `test_action_with_infer_action=True` "
                 "and always runs with `test_action_with_infer_action=False`."
             )
         return super().infer_joint(

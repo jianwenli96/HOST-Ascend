@@ -1,7 +1,7 @@
-# NOTE: create_fastwam_joint instantiates FastWAMJoint (NOT FastWAM base).
-# FastWAMJoint._build_mot_attention_mask: action attends to ALL video tokens in self-attn.
-# FastWAM base (do NOT confuse): action only attends to first-frame video tokens.
-_target_: fastwam.runtime.create_fastwam_joint
+# NOTE: create_self_grounded_predictor instantiates SelfGroundedPredictorJoint (NOT SelfGroundedPredictor base).
+# SelfGroundedPredictorJoint._build_mot_attention_mask: action attends to ALL video tokens in self-attn.
+# SelfGroundedPredictor base (do NOT confuse): action only attends to first-frame video tokens.
+_target_: self_grounded_prediction.runtime.create_self_grounded_predictor
 model_id: Wan-AI/Wan2.2-TI2V-5B
 tokenizer_model_id: Wan-AI/Wan2.1-T2V-1.3B
 tokenizer_max_len: 512

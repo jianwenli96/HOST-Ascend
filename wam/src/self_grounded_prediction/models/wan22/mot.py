@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from einops import rearrange
 
 from .wan_video_dit import flash_attention, modulate, rope_apply
-from fastwam.utils.logging_config import get_logger
+from self_grounded_prediction.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 

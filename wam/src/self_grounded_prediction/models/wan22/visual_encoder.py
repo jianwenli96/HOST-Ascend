@@ -35,7 +35,7 @@ import timm
 import torch
 import torch.nn as nn
 
-from fastwam.utils.logging_config import get_logger
+from self_grounded_prediction.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 

@@ -6,7 +6,7 @@ from typing import Any, Dict, Tuple, Optional
 from einops import rearrange
 from .helpers.gradient import gradient_checkpoint_forward
 
-from fastwam.utils.logging_config import get_logger
+from self_grounded_prediction.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 

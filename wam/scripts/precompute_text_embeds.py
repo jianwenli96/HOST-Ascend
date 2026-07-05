@@ -18,10 +18,10 @@ import torch.distributed as dist
 from omegaconf import DictConfig, ListConfig
 from tqdm import tqdm
 
-from fastwam.models.wan22.helpers.loader import _load_registered_model, _resolve_configs
-from fastwam.models.wan22.wan_video_text_encoder import HuggingfaceTokenizer
-from fastwam.utils.config_resolvers import register_default_resolvers
-from fastwam.utils.logging_config import get_logger, setup_logging
+from self_grounded_prediction.models.wan22.helpers.loader import _load_registered_model, _resolve_configs
+from self_grounded_prediction.models.wan22.wan_video_text_encoder import HuggingfaceTokenizer
+from self_grounded_prediction.utils.config_resolvers import register_default_resolvers
+from self_grounded_prediction.utils.logging_config import get_logger, setup_logging
 
 register_default_resolvers()
 logger = get_logger(__name__)

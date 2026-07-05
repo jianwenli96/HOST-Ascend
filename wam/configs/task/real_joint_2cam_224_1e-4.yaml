@@ -2,7 +2,7 @@
 
 defaults:
   - override /data: custom
-  - override /model: fastwam_joint
+  - override /model: self_grounded_predictor_joint
   - _self_
 
 # dataloading

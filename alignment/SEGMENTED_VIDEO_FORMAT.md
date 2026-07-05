@@ -92,7 +92,7 @@ else:
 
 ### 1. 路径解析 (`_parse_video_path`)
 
-**位置**: `datasets.py` - LiberoDataset类
+**位置**: `datasets.py` - AlignmentDataset类
 
 **功能**: 解析视频路径字符串，支持新旧两种格式
 
@@ -132,7 +132,7 @@ parsed = _parse_video_path(selected)  # 只解析选中的
 
 ### 3. 统一View获取 (`_get_available_views`)
 
-**位置**: `datasets.py` - LiberoDataset类
+**位置**: `datasets.py` - AlignmentDataset类
 
 **功能**: 统一处理view获取，自动适配mp4和目录两种形式
 
@@ -173,7 +173,7 @@ def _get_files(self, video_info, view=None):
 - 从segment子文件夹加载 task_paths.json
 - 调用 `_get_files` 时传递 video_info 和 view
 
-### 6. 视频数据集 (`LiberoVideoDataset`)
+### 6. 视频数据集 (`AlignmentVideoDataset`)
 
 **修改**:
 - `__init__`: 传递 video_info 到 `_get_files`
@@ -249,11 +249,11 @@ python3 train.py \
 |------|-----------|----------|------|
 | datasets.py | `_parse_video_path` | 新增 | +75 |
 | datasets.py | `_get_available_views` | 新增 | +25 |
-| datasets.py | `__init__` (LiberoDataset) | 修改 | +3 |
+| datasets.py | `__init__` (AlignmentDataset) | 修改 | +3 |
 | datasets.py | `_get_files` | 重构 | +50 |
 | datasets.py | `_load_video_data_from_json` | 重构（延迟解析） | +45 |
-| datasets.py | `LiberoVideoDataset.__init__` | 修改 | +3 |
-| datasets.py | `LiberoVideoDataset._get_item_impl` | 修改（延迟解析） | +40 |
+| datasets.py | `AlignmentVideoDataset.__init__` | 修改 | +3 |
+| datasets.py | `AlignmentVideoDataset._get_item_impl` | 修改（延迟解析） | +40 |
 
 **总计**: ~241行新增/修改代码
 

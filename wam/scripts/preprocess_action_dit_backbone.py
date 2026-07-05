@@ -11,8 +11,8 @@ import torch
 import torch.nn.functional as F
 from omegaconf import OmegaConf
 
-from fastwam.models.wan22.action_dit import ActionDiT
-from fastwam.models.wan22.helpers.loader import load_wan22_ti2v_5b_components
+from self_grounded_prediction.models.wan22.action_dit import ActionDiT
+from self_grounded_prediction.models.wan22.helpers.loader import load_wan22_ti2v_5b_components
 
 
 def _parse_dtype(name: str) -> torch.dtype:
@@ -145,7 +145,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Preprocess ActionDiT backbone weights from WanVideoDiT and save as .pt payload."
     )
-    parser.add_argument("--model-config", required=True, help="Path to model yaml, e.g. configs/model/fastwam.yaml")
+    parser.add_argument("--model-config", required=True, help="Path to model yaml, e.g. configs/model/self_grounded_prediction.yaml")
     parser.add_argument("--output", required=True, help="Output .pt path for preprocessed ActionDiT backbone.")
     parser.add_argument("--device", default="cpu", help="Device for loading model and preprocessing.")
     parser.add_argument("--dtype", default="float32", choices=["float32", "float16", "bfloat16"])

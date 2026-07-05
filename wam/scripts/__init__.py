@@ -1,1 +1,1 @@
-"""CLI entry scripts for fastwam."""
+"""CLI entry scripts for self_grounded_prediction."""

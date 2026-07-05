@@ -2,7 +2,7 @@
 
 defaults:
   - override /data: custom_cross_all_band
-  - override /model: fastwam_joint_cross_attn
+  - override /model: self_grounded_predictor_joint_cross_attn
   - _self_
 
 # dataloading

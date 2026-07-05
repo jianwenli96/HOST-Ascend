@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "fastwam"
+name = "self_grounded_prediction"
 version = "0.1.0"
-description = "FastWAM: standalone Wan2.2-TI2V-5B training/inference package"
+description = "Self-grounded prediction: standalone Wan2.2-TI2V-5B training/inference package"
 requires-python = ">=3.10"
 dependencies = [
   "accelerate==1.12.0",
@@ -45,4 +45,4 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["fastwam*"]
+include = ["self_grounded_prediction*"]

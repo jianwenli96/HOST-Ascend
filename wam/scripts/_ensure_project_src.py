@@ -1,4 +1,4 @@
-"""Ensure ``<project_root>/src`` is on ``sys.path`` so ``import fastwam`` works without pip.
+"""Ensure ``<project_root>/src`` is on ``sys.path`` so ``import self_grounded_prediction`` works without pip.
 
 Project root is inferred as the parent of the ``scripts/`` directory containing this
 file — no absolute paths, safe if the repo is moved or symlinked.

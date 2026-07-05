@@ -1,5 +1,5 @@
 """
-Visualization script for FastWAM evaluation episodes.
+Visualization script for SelfGroundedPredictor evaluation episodes.
 
 Usage:
     python scripts/visualize_eval_episode.py <eval_json_path> [options]
@@ -118,7 +118,7 @@ def get_path_transforms(dataset_name: str | None) -> dict:
         _src = osp.join(osp.dirname(__file__), "..", "src")
         if _src not in sys.path:
             sys.path.insert(0, _src)
-        from fastwam.datasets.custom.path_transforms_config import get_path_transforms as _gpt
+        from self_grounded_prediction.datasets.custom.path_transforms_config import get_path_transforms as _gpt
         return _gpt(dataset_name)
     except Exception:
         # Common default for x2robot datasets
@@ -465,7 +465,7 @@ class Episode:
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Visualize FastWAM eval episode pair (3 rows).")
+    parser = argparse.ArgumentParser(description="Visualize SelfGroundedPredictor eval episode pair (3 rows).")
     parser.add_argument("json_path")
     parser.add_argument("--output", default=None)
     parser.add_argument("--fps", type=int, default=8)

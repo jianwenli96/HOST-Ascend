@@ -1,4 +1,4 @@
-"""Shared action visualization utilities for FastWAM eval (training + open-loop)."""
+"""Shared action visualization utilities for SelfGroundedPredictor eval (training + open-loop)."""
 from __future__ import annotations
 
 import math

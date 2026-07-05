@@ -1,7 +1,7 @@
 """
-Open-loop evaluation dataset for FastWAM.
+Open-loop evaluation dataset for SelfGroundedPredictor.
 
-Inherits all file-loading helpers from Emu3SFTDataset (mydatasets.py).
+Inherits all file-loading helpers from CustomDataset (mydatasets.py).
 Does NOT call super().__init__() — that requires training-specific args
 (tokenizer, DataArguments, etc.).
 
@@ -21,15 +21,15 @@ _project_src = osp.join(osp.dirname(__file__), "..", "..", "src")
 if _project_src not in sys.path:
     sys.path.insert(0, _project_src)
 
-from fastwam.datasets.custom.mydatasets import (
-    Emu3SFTDataset,
+from self_grounded_prediction.datasets.custom.mydatasets import (
+    CustomDataset,
     ACTION_DOWNSAMPLE_FACTOR,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class FastWAMEvalDataset(Emu3SFTDataset):
+class SelfGroundedPredictorEvalDataset(CustomDataset):
     """Per-episode dataset that loads GT actions, frame paths, and joint data.
 
     Returns raw (unnormalized) data for comparison against model predictions.
@@ -116,7 +116,7 @@ class FastWAMEvalDataset(Emu3SFTDataset):
         self.static_gripper_threshold = static_gripper_threshold
         if remove_static_frames:
             logging.warning(
-                "[FastWAMEvalDataset] remove_static_frames=True: GT will be filtered "
+                "[SelfGroundedPredictorEvalDataset] remove_static_frames=True: GT will be filtered "
                 "with thresholds rot=%.4f, trans=%.4f, grip=%.4f",
                 static_rot_threshold, static_trans_threshold, static_gripper_threshold,
             )
@@ -134,13 +134,13 @@ class FastWAMEvalDataset(Emu3SFTDataset):
 
         # ---- Populate episode list ----
         self.data = self._load_from_json(data_path)
-        logger.info("[FastWAMEvalDataset] Loaded %d episodes from %s", len(self.data), data_path)
+        logger.info("[SelfGroundedPredictorEvalDataset] Loaded %d episodes from %s", len(self.data), data_path)
 
         # ---- Build norm_low / norm_high ----
         self.dataset_name = dataset_name
         _ds_factor = int((self.action_downsample_factor or {}).get(dataset_name, 1))
         self.norm_low, self.norm_high = self._build_action_norms(dataset_name, _ds_factor)
-        logger.info("[FastWAMEvalDataset] action norm_low shape=%s, norm_high shape=%s",
+        logger.info("[SelfGroundedPredictorEvalDataset] action norm_low shape=%s, norm_high shape=%s",
                      self.norm_low.shape, self.norm_high.shape)
 
     # ------------------------------------------------------------------
@@ -155,7 +155,7 @@ class FastWAMEvalDataset(Emu3SFTDataset):
         mapping = self._load_joint_action_mapping(dataset_name)
         if not mapping:
             raise RuntimeError(
-                f"[FastWAMEvalDataset] No mapping for dataset '{dataset_name}'. "
+                f"[SelfGroundedPredictorEvalDataset] No mapping for dataset '{dataset_name}'. "
                 f"Check joint_action_mapping_dir={self.joint_action_mapping_dir}"
             )
         entry = next(iter(mapping.values()))

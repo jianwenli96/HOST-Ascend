@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
 
-from fastwam.utils.logging_config import get_logger
+from self_grounded_prediction.utils.logging_config import get_logger
 
 from .action_dit import ActionDiT
 from .helpers.loader import load_wan22_ti2v_5b_components
@@ -16,16 +16,16 @@ from .visual_encoder import FirstFrameVisualEncoder
 logger = get_logger(__name__)
 
 
-class FastWAM(torch.nn.Module):
+class SelfGroundedPredictor(torch.nn.Module):
     """MoT world model with video/action experts.
 
     WARNING — THIS IS THE BASE CLASS AND IS NOT USED DIRECTLY IN PRODUCTION.
-    Production configs (_target_: fastwam.runtime.create_fastwam_joint) instantiate
-    FastWAMJoint (fastwam_joint.py), which overrides _build_mot_attention_mask.
+    Production configs (_target_: self_grounded_prediction.runtime.create_self_grounded_predictor) instantiate
+    SelfGroundedPredictorJoint (self_grounded_predictor_joint.py), which overrides _build_mot_attention_mask.
 
     The key behavioral difference is in _build_mot_attention_mask:
-        FastWAM (this class):  action → first-frame video tokens only
-        FastWAMJoint (subclass, used in prod): action → ALL video tokens
+        SelfGroundedPredictor (this class):  action → first-frame video tokens only
+        SelfGroundedPredictorJoint (subclass, used in prod): action → ALL video tokens
     """
 
     def __init__(
@@ -263,9 +263,9 @@ class FastWAM(torch.nn.Module):
         visual_encoder_config: Optional[dict] = None,
     ):
         if video_dit_config is None:
-            raise ValueError("`video_dit_config` is required for FastWAM.from_wan22_pretrained().")
+            raise ValueError("`video_dit_config` is required for SelfGroundedPredictor.from_wan22_pretrained().")
         if "text_dim" not in video_dit_config:
-            raise ValueError("`video_dit_config['text_dim']` is required for FastWAM.")
+            raise ValueError("`video_dit_config['text_dim']` is required for SelfGroundedPredictor.")
 
         components = load_wan22_ti2v_5b_components(
             device=device,
@@ -473,7 +473,7 @@ class FastWAM(torch.nn.Module):
         video = sample["video"]
         if "context" not in sample or "context_mask" not in sample:
             raise ValueError(
-                "FastWAM training requires `sample['context']` and `sample['context_mask']`."
+                "SelfGroundedPredictor training requires `sample['context']` and `sample['context_mask']`."
             )
         context = sample["context"]
         context_mask = sample["context_mask"]
@@ -494,7 +494,7 @@ class FastWAM(torch.nn.Module):
             raise ValueError(f"Video T must be > 1 for action-conditioned training, got T={num_frames}")
 
         if "action" not in sample:
-            raise ValueError("`sample['action']` is required for FastWAM training.")
+            raise ValueError("`sample['action']` is required for SelfGroundedPredictor training.")
 
         action = sample["action"]
         if action.ndim != 3:
@@ -619,15 +619,15 @@ class FastWAM(torch.nn.Module):
     ) -> torch.Tensor:
         """Build attention mask for [progress | task_video | video | noisy_group | action].
 
-        NOTE: FastWAMJoint (fastwam_joint.py) overrides this method so that
+        NOTE: SelfGroundedPredictorJoint (self_grounded_predictor_joint.py) overrides this method so that
         action attends to ALL video tokens. This base version restricts action
-        to first-frame video only. In production we use FastWAMJoint.
+        to first-frame video only. In production we use SelfGroundedPredictorJoint.
 
         When noisy_group_seq_len > 0, an isolated noisy group is inserted between
         agent video and action. The noisy group self-attends (full) but is completely
         blocked from all other tokens (bidirectional isolation).
 
-        Attention rules (base FastWAM):
+        Attention rules (base SelfGroundedPredictor):
             progress -> task_video/agent_video: full; -> action/noisy: blocked
             task_video -> progress/task_video: full; -> rest: blocked
             video -> progress/task_video/video: allowed; -> noisy/action: blocked

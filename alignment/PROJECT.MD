@@ -52,7 +52,7 @@ To ensure the model processes each group as if it immediately follows the prefix
 ## 3. Implementation Details
 
 ### 3.1. Data Pipeline (`datasets.py`)
-The `TCCCollator` class handles the complex batch construction:
+The `AlignmentCollator` class handles the complex batch construction:
 
 1.  **Chunking**: Slices the `frame_paths` into chunks of size `CONFIG.DATA.NUM_STEPS`.
 2.  **Packing**: Constructs the Qwen input. After each chunk's images, it appends the `self.cls_token_name` (`<|file_sep|>`).
@@ -82,7 +82,7 @@ This file intercepts the `forward` call of `Qwen3VLModel`.
 - **Trigger**: The logic is triggered automatically when packed metadata is detected.
 
 ### 3.4. AttentionGate (Temporal Cross-Attention)
-The `AttentionGate` (or `TCCTransformerGate`) is a transformer-based cross-attention module that allows the "Main" video chunks to attend to the "Reference" video's alignment frames.
+The `AttentionGate` is a transformer-based cross-attention module that allows the "Main" video chunks to attend to the "Reference" video's alignment frames.
 
 1.  **Old Behavior**: The gate received all image patches from a chunk ($P \times D$, where $P \sim 196$ for Qwen3-VL). This was computationally expensive ($O(T_{main} \times T_{ref} \times P^2)$).
 2.  **Optimized Behavior**: It now only receives the single **CLS token embedding** per chunk.
@@ -105,7 +105,7 @@ Key parameters in `config.py` that affect this logic:
 To support training on long video sequences (up to 96 frames) without exceeding memory limits, we implemented a **Chunk-Multiplier Strategy**.
 
 ### 6.1. Multi-Multiplier Collation (`datasets.py`)
-The `TCCCollator` now supports variable multipliers $M \in \{1, 2, 4\}$:
+The `AlignmentCollator` now supports variable multipliers $M \in \{1, 2, 4\}$:
 
 - **Resampling**: The dataset samples up to 96 frames initially. The collator then performs **uniform resampling** (via `np.linspace`) to reach the target length $M \times 24$.
 - **Chunking**: The resampled sequence is split into $M$ chunks, each containing exactly 24 steps ($chunk\_len$).
@@ -149,7 +149,7 @@ A simple sequence reversal of frames would make "past" context frames appear lik
 To handle out-of-distribution frames and "cut" scenarios where no alignment exists, we implemented a robust **Dustbin Mechanism**.
 
 ### 8.1. Data Pipeline Modifications (`datasets.py`)
-- **Block Cuts**: The `TCCCollator` randomly selects a contiguous block of indices (10% to 50% of total length) to remove from the reference video, simulating temporal gaps.
+- **Block Cuts**: The `AlignmentCollator` randomly selects a contiguous block of indices (10% to 50% of total length) to remove from the reference video, simulating temporal gaps.
 - **Dustbin Chunk**: A specific "Dustbin" chunk (black images, index 0) is prepended to the reference sequence.
 - **Is-Cut Mask**: A mask is maintained tracking which reference time-steps correspond to the cut video segments.
 

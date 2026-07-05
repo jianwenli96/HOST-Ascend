@@ -1,5 +1,5 @@
 """
-Action normalization / denormalization utilities for FastWAM eval.
+Action normalization / denormalization utilities for SelfGroundedPredictor eval.
 
 Ported from UniVLA2 model_wrapper_real.py (lines 200-457).
 """
@@ -173,7 +173,7 @@ def relative_to_absolute(
 ) -> np.ndarray:
     """Convert denormalized relative actions (6D rotation) back to absolute.
 
-    Inverse of Emu3SFTDataset._compute_relative_actions:
+    Inverse of CustomDataset._compute_relative_actions:
         pos_abs = pos_rel + pos_follow_ref
         R_abs   = R_rel @ R_follow_ref   (since R_rel = R_master @ R_follow^T)
 

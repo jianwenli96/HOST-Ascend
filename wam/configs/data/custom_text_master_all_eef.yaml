@@ -1,5 +1,5 @@
 train:
-  _target_: fastwam.datasets.custom.mydatasets.build_custom_dataset
+  _target_: self_grounded_prediction.datasets.custom.mydatasets.build_custom_dataset
 
   # Data source
   data_path: "/open_data/cgy/processed_data/video_paths_basket/clean/10042_video_paths.json"
@@ -24,7 +24,7 @@ train:
   static_trans_threshold: 0.01      # metres
   static_gripper_threshold: 0.01
 
-  # Indicator (not yet supported in FastWAM)
+  # Indicator (not yet supported in SelfGroundedPredictor)
   use_indicator_prompt: false
   use_indicator_positive: false
 
@@ -50,7 +50,7 @@ train:
     action_output_dim: 22   # dual-arm action dim (6D rotation: (3+6+1)*2 = 20)
     proprio_output_dim: 20   # dual-arm joint state dim
 
-  # FastWAM video params
+  # SelfGroundedPredictor video params
   action_video_freq_ratio: 8        # video downsample ratio
   max_action_len: 32                # must be divisible by (T_video-1); T_video=9 -> 8*4=32
   context_len: 512                  # T5 text embedding length
@@ -103,7 +103,7 @@ train:
     '10058': 32
 
 val:
-  _target_: fastwam.datasets.custom.mydatasets.build_custom_dataset
+  _target_: self_grounded_prediction.datasets.custom.mydatasets.build_custom_dataset
 
   # Data source — override at launch:  data.val.data_path=/path/to/val.json
   data_path: ${data.train.data_path}
