@@ -1,4 +1,4 @@
-# Self-Grounded Prediction (wam/)
+# Self-Grounded Prediction (policy_training/)
 
 This module implements **self-grounded prediction**, the mechanism behind **HOST (Human-to-robot
 One-shot Skill Transfer)** that resolves execution from a coupled visual demonstration: it
@@ -25,7 +25,7 @@ video/action experts (a Mixture-of-Transformers architecture) built on top of th
 ## File Structure
 
 ```text
-wam/
+policy_training/
 ├── configs/
 │   ├── data/                 # Dataset configs (data_path, cam_mapping_dir, joint_action_mapping_dir, ...)
 │   ├── model/                # Model architecture configs (self_grounded_predictor_joint*.yaml)
@@ -84,21 +84,21 @@ python scripts/preprocess_action_dit_backbone.py \
 
 ## Data Preparation
 
-`wam/` and `alignment/` consume the same on-disk data convention — see
-[`docs/data_format.md`](../docs/data_format.md) at the repo root for the full, single-source-of-truth
-schema (video-paths list, episode directory layout, camera mapping, joint/action normalization).
-The shipped configs (`configs/data/custom*.yaml`) point at this team's internal cluster paths —
-replace `data_path` / `cam_mapping_dir` / `joint_action_mapping_dir` with your own data in that
-format.
+`policy_training/` and `alignment/` consume the same on-disk data convention — see
+[`data_preprocessing/README.md`](../data_preprocessing/README.md) at the repo root for the full,
+single-source-of-truth schema (video-paths list, episode directory layout, camera mapping,
+joint/action normalization). The shipped configs (`configs/data/custom*.yaml`) point at this
+team's internal cluster paths — replace `data_path` / `cam_mapping_dir` /
+`joint_action_mapping_dir` with your own data in that format.
 
-`wam/` specifically **requires** the action/joint trajectory (`episode_001.json`) and text
-instruction (`instruction.txt`/`instruction.pt`) fields described there — see
-[§6 of `docs/data_format.md`](../docs/data_format.md#6-per-module-differences) for the exact
-per-module requirements. Also set, per dataset id in `configs/data/custom.yaml`: `dataset_fps`
-(minimum-length filtering and action-frame sampling) and `dataset_image_size` (`[width, height]`).
-If your dataset has a different action dimensionality than the shipped example, update
-`processor.action_output_dim` / `processor.proprio_output_dim` and the corresponding `action_dim`
-in your model config to match.
+`policy_training/` specifically **requires** the action/joint trajectory (`episode_001.json`) and
+text instruction (`instruction.txt`/`instruction.pt`) fields described there — see
+[§2.6 of `data_preprocessing/README.md`](../data_preprocessing/README.md#26-per-module-differences)
+for the exact per-module requirements. Also set, per dataset id in `configs/data/custom.yaml`:
+`dataset_fps` (minimum-length filtering and action-frame sampling) and `dataset_image_size`
+(`[width, height]`). If your dataset has a different action dimensionality than the shipped
+example, update `processor.action_output_dim` / `processor.proprio_output_dim` and the
+corresponding `action_dim` in your model config to match.
 
 ## Training
 

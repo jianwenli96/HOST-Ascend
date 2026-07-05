@@ -6,7 +6,8 @@ task-progress manifold, so the robot's prediction target is coupled to the corre
 the demonstration rather than to raw clock time. It trains a frame-embedding model (Qwen3-VL
 backbone) with Temporal Cycle-Consistency (TCC) and Smooth DTW losses so that semantically
 corresponding moments across two videos of the same task map to nearby points in embedding space;
-`wam/`'s dataset construction uses this alignment to build its coupled prediction targets.
+`policy_training/`'s dataset construction uses this alignment (via `coupling/`) to build its
+coupled prediction targets.
 
 ## Index
 
@@ -46,20 +47,21 @@ image/video processor stack.
 
 ## Data Preparation
 
-`alignment/` and `wam/` consume the same on-disk data convention — see
-[`docs/data_format.md`](../docs/data_format.md) at the repo root for the full, single-source-of-truth
-schema (video-paths list, episode directory layout, camera mapping, joint/action normalization).
-The shipped script points at this team's internal cluster paths
+`alignment/` and `policy_training/` consume the same on-disk data convention — see
+[`data_preprocessing/README.md`](../data_preprocessing/README.md) at the repo root for the full,
+single-source-of-truth schema (video-paths list, episode directory layout, camera mapping,
+joint/action normalization) and the task-grouping scripts that build `task_paths.json`. The
+shipped script points at this team's internal cluster paths
 (`--video_paths /open_data/cgy/processed_data/video_paths_basket/clean/10042_video_paths.json`) —
 replace it with your own data in that format.
 
 `alignment/` specifically needs only video frames plus task grouping (`task_paths.json`) — no
 robot actions/joint data are required unless you enable joint conditioning
 (`CONFIG.JOINTS.USE_JOINTS`); see
-[§6 of `docs/data_format.md`](../docs/data_format.md#6-per-module-differences) for the exact
-per-module requirements. Video-paths entries can also address a segment of a longer recording as
-`path:segment_id:start-end` (inclusive frame range) — see `alignment/SEGMENTED_VIDEO_FORMAT.md`
-for that case.
+[§2.6 of `data_preprocessing/README.md`](../data_preprocessing/README.md#26-per-module-differences)
+for the exact per-module requirements. Video-paths entries can also address a segment of a longer
+recording as `path:segment_id:start-end` (inclusive frame range) — see
+`alignment/SEGMENTED_VIDEO_FORMAT.md` for that case.
 
 Relevant `config.py` fields:
 

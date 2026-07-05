@@ -1,4 +1,4 @@
-# Self-Grounded Prediction (wam/)
+# Self-Grounded Prediction (policy_training/)
 
 本模块实现 **self-grounded prediction（自我校准预测）**，这是 **HOST (Human-to-robot One-shot
 Skill Transfer)** 中负责从耦合的视觉示范中恢复执行的机制：先定位机器人在视觉示范中的当前进度，
@@ -23,7 +23,7 @@ Skill Transfer)** 中负责从耦合的视觉示范中恢复执行的机制：�
 ## 文件结构
 
 ```text
-wam/
+policy_training/
 ├── configs/
 │   ├── data/                 # 数据集配置（data_path、cam_mapping_dir、joint_action_mapping_dir 等）
 │   ├── model/                # 模型架构配置（self_grounded_predictor_joint*.yaml）
@@ -81,17 +81,18 @@ python scripts/preprocess_action_dit_backbone.py \
 
 ## 数据准备
 
-`wam/` 和 `alignment/` 共用同一套磁盘数据规范 —— 完整的、唯一权威的格式说明见仓库根目录的
-[`docs/data_format.md`](../docs/data_format.md)（视频路径列表、episode 目录结构、相机映射、
-关节/动作归一化）。仓库自带的配置（`configs/data/custom*.yaml`）指向的是内部集群路径 —— 请将
-`data_path` / `cam_mapping_dir` / `joint_action_mapping_dir` 替换成你自己按该格式准备的数据。
+`policy_training/` 和 `alignment/` 共用同一套磁盘数据规范 —— 完整的、唯一权威的格式说明见仓库
+根目录的 [`data_preprocessing/README.md`](../data_preprocessing/README.md)（视频路径列表、
+episode 目录结构、相机映射、关节/动作归一化）。仓库自带的配置（`configs/data/custom*.yaml`）
+指向的是内部集群路径 —— 请将 `data_path` / `cam_mapping_dir` / `joint_action_mapping_dir`
+替换成你自己按该格式准备的数据。
 
-`wam/` 具体要求 **必须** 提供动作/关节轨迹（`episode_001.json`）和文本指令
+`policy_training/` 具体要求 **必须** 提供动作/关节轨迹（`episode_001.json`）和文本指令
 （`instruction.txt`/`instruction.pt`）字段 —— 各模块的具体要求差异见
-[`docs/data_format.md` 第 6 节](../docs/data_format.md#6-per-module-differences)。此外还需在
-`configs/data/custom.yaml` 中按 dataset id 设置：`dataset_fps`（用于最短长度过滤与动作帧采样）
-和 `dataset_image_size`（`[width, height]`）。如果你的数据集动作维度与示例不同，需同步更新
-`processor.action_output_dim` / `processor.proprio_output_dim`，以及模型配置里对应的
+[`data_preprocessing/README.md` 第 2.6 节](../data_preprocessing/README.md#26-per-module-differences)。
+此外还需在 `configs/data/custom.yaml` 中按 dataset id 设置：`dataset_fps`（用于最短长度过滤与
+动作帧采样）和 `dataset_image_size`（`[width, height]`）。如果你的数据集动作维度与示例不同，
+需同步更新 `processor.action_output_dim` / `processor.proprio_output_dim`，以及模型配置里对应的
 `action_dim`。
 
 ## 训练
