@@ -15,7 +15,7 @@ from transformers import AutoProcessor
 from algorithms import get_algo
 from config import CONFIG
 from datasets import create_dataset
-from utils import get_lr_scheduler, get_optimizer, restore_ckpt, setup_train_dir, save_checkpoint, to_dict, log_and_save_high_loss_samples, check_nan, register_debug_hooks
+from utils import restore_ckpt, setup_train_dir, save_checkpoint, to_dict, log_and_save_high_loss_samples, check_nan, register_debug_hooks
 
 flags.DEFINE_string('logdir', '/tmp/alignment_logs', 'Path to logs.')
 flags.DEFINE_string('resume_dir', None, 'Path to checkpoint directory to resume from. If None, starts from scratch.')
@@ -33,7 +33,7 @@ flags.DEFINE_boolean(
 flags.DEFINE_boolean('visualize', False, 'Visualize images, gradients etc. '
                      'Switched off by for default to speed training up and '
                      'takes less memory.')
-flags.DEFINE_string('network', 'Resnet50_pretrained', 'Base network to use: Resnet50_pretrained, dinov2_vitb14, or dinov2_vitl14')
+flags.DEFINE_string('network', 'Qwen3-VL-2B', 'Base network to use (must contain "Qwen3-VL").')
 flags.DEFINE_string('video_paths', None, 'Comma-separated list of paths to video_paths.json.')
 flags.DEFINE_integer('local_rank', -1, 'Local rank for distributed training')
 flags.DEFINE_integer('gradient_accumulation_steps', 1, 'Gradient accumulation steps.')

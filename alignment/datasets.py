@@ -1314,22 +1314,6 @@ class AlignmentDataset(Dataset):
 
         else:
             raise ValueError(f"Unknown sampling strategy: {sampling_strategy}")
-            
-        # TCN Positive Window Sampling
-        if 'tcn' in CONFIG.TRAINING_ALGO:
-            pos_window = CONFIG.TCN.POSITIVE_WINDOW
-            pos_steps = []
-            for step in steps:
-                min_val = max(0, step - pos_window)
-                max_val = max(min_val + 1, step) # Ensure range is valid
-                pos_step = random.randint(min_val, max_val - 1) if max_val > min_val else step
-                pos_steps.append(pos_step)
-            
-            # Interleave pos_steps and steps: [p0, s0, p1, s1, ...]
-            combined_steps = np.empty(len(steps) * 2, dtype=steps.dtype)
-            combined_steps[0::2] = pos_steps
-            combined_steps[1::2] = steps
-            steps = combined_steps
 
         return steps
 

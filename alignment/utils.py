@@ -2,13 +2,11 @@
 """Util functions."""
 
 import io
-import math
 import os
 import time
 import yaml
 import numpy as np
 import torch
-import torch.optim as optim
 from easydict import EasyDict
 from config import CONFIG
 
@@ -56,66 +54,6 @@ def register_debug_hooks(model):
     print("DEBUG: Registering backward hooks on all modules...")
     for name, module in model.named_modules():
         module.register_full_backward_hook(hook_fn)
-
-def get_lr_scheduler(optimizer, optimizer_config, last_epoch=-1):
-    """Returns learning rate scheduler based on config."""
-    lr_params = optimizer_config.LR
-    if lr_params.DECAY_TYPE == 'exp_decay':
-        scheduler = optim.lr_scheduler.StepLR(
-            optimizer,
-            step_size=lr_params.EXP_DECAY_STEPS,
-            gamma=lr_params.EXP_DECAY_RATE,
-            last_epoch=last_epoch
-        )
-    elif lr_params.DECAY_TYPE == 'manual':
-        lr_step_boundaries = [int(x) for x in lr_params.MANUAL_LR_STEP_BOUNDARIES]
-        scheduler = optim.lr_scheduler.MultiStepLR(
-            optimizer,
-            milestones=lr_step_boundaries,
-            gamma=lr_params.MANUAL_LR_DECAY_RATE,
-            last_epoch=last_epoch
-        )
-    elif lr_params.DECAY_TYPE == 'fixed':
-        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0, last_epoch=last_epoch)
-    elif lr_params.DECAY_TYPE == 'poly':
-        # PyTorch doesn't have a direct PolynomialDecay, implementing a lambda
-        max_iters = CONFIG.TRAIN.MAX_ITERS
-        power = 1.0
-        lr_lambda = lambda step: (1 - step / max_iters) ** power
-        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda, last_epoch=last_epoch)
-    elif lr_params.DECAY_TYPE == 'warmup_cosine':
-        max_iters = CONFIG.TRAIN.MAX_ITERS
-        warmup_fraction = lr_params.WARMUP_FRACTION
-        warmup_steps = int(max_iters * warmup_fraction)
-        initial_lr = lr_params.INITIAL_LR
-        end_lr = lr_params.END_LR
-        
-        def lr_lambda(step):
-            if step < warmup_steps:
-                return float(step) / float(max(1, warmup_steps))
-            else:
-                progress = float(step - warmup_steps) / float(max(1, max_iters - warmup_steps))
-                cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
-                decayed = (1 - cosine_decay) * end_lr + cosine_decay * initial_lr
-                return decayed / initial_lr
-        
-        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda, last_epoch=last_epoch)
-    else:
-        raise ValueError('Learning rate decay type %s not supported.' % lr_params.DECAY_TYPE)
-    
-    # Warmup handling could be added here or wrapped around
-    return scheduler
-
-def get_optimizer(model_params, optimizer_config):
-    """Returns optimizer based on config."""
-    learning_rate = optimizer_config.LR.INITIAL_LR
-    if optimizer_config.TYPE == 'AdamOptimizer':
-        opt = optim.Adam(model_params, lr=learning_rate)
-    elif optimizer_config.TYPE == 'MomentumOptimizer':
-        opt = optim.SGD(model_params, lr=learning_rate, momentum=0.9)
-    else:
-        raise ValueError('Optimizer %s not supported.' % optimizer_config.TYPE)
-    return opt
 
 def save_checkpoint(logdir, state, is_best=False):
     step = state.get('global_step', 'unknown')

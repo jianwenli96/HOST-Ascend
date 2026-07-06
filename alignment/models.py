@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
-import torchvision.models as models
 import os
 from transformers import AutoModelForCausalLM, AutoProcessor
 try:
@@ -23,138 +22,8 @@ class BaseModel(nn.Module):
     def __init__(self, num_steps):
         super(BaseModel, self).__init__()
         network = CONFIG.MODEL.BASE_MODEL.NETWORK
-        layer = CONFIG.MODEL.BASE_MODEL.LAYER
-        
-        if network in ['Resnet50', 'Resnet50_pretrained']:
-            print('Loading ResNet50 model...')
-            # TODO(open-source): internal-cluster path; not load-bearing for the
-            # verified training run (NETWORK=Qwen3-VL-2B doesn't reach this branch),
-            # and already falls back to a public download below. Low priority.
-            # See OPEN_SOURCE_PATH_TODOS.md.
-            # Load pretrained ResNet50
-            resnet = models.resnet50(pretrained=False)
-            resnet_ckpt_path = '/x2robot_v2/ethanchen/open_ckpts/resnet/resnet50-0676ba61.pth'
-            if not os.path.exists(resnet_ckpt_path):
-                resnet_ckpt_path = '/x2robot_v2/ethanchen/open_ckpts/resnet/resnet50.pth'
-            
-            if os.path.exists(resnet_ckpt_path):
-                print(f"Loading pretrained ResNet50 from {resnet_ckpt_path}")
-                resnet.load_state_dict(torch.load(resnet_ckpt_path))
-            else:
-                print(f"Warning: Could not find ResNet50 weights at {resnet_ckpt_path}. Downloading...")
-                resnet = models.resnet50(pretrained=True)
 
-            # We need to extract features from a specific layer.
-            # 'conv4_block3_out' in TF ResNet50V2 roughly corresponds to layer3 in PyTorch ResNet.
-            # But let's check the architecture.
-            # layer3 output is 1024 channels, 14x14 (for 224x224 input).
-            # layer4 output is 2048 channels, 7x7.
-            
-            # In TF code: base_model.get_layer(layer).output
-            # If layer is 'conv4_block3_out', it is likely the output of the 3rd block of the 4th stage (which is layer3 in PyTorch).
-            
-            self.base_model = nn.Sequential(
-                resnet.conv1,
-                resnet.bn1,
-                resnet.relu,
-                resnet.maxpool,
-                resnet.layer1,
-                resnet.layer2,
-                resnet.layer3
-            )
-            # If we need layer4, we would add resnet.layer4
-            
-        elif network == 'dinov2_vitb14':
-            print("Loading DINOv2 Base model...")
-            # TODO(open-source): internal-cluster paths below; not load-bearing for
-            # the verified training run (NETWORK=Qwen3-VL-2B doesn't reach this
-            # branch), and already falls back to a public download further down.
-            # Low priority. See OPEN_SOURCE_PATH_TODOS.md.
-
-            # Use local source for DINOv2 to avoid network issues
-            repo_dir = '/x2robot_v2/ethanchen/code/dinov2_source'
-            if not os.path.exists(repo_dir):
-                 raise FileNotFoundError(f"DINOv2 source not found at {repo_dir}. Please clone it first.")
-            
-            print(f"Loading DINOv2 from local source: {repo_dir}")
-            self.base_model = torch.hub.load(repo_dir, 'dinov2_vitb14', source='local', pretrained=False)
-            
-            # Local paths
-            local_dir = '/x2robot_v2/ethanchen/open_ckpts/dinov2_vitb14'
-            ckpt_filename = 'dinov2_vitb14_pretrain.pth'
-            ckpt_path = os.path.join(local_dir, ckpt_filename)
-            
-            # Ensure directory exists
-            if not os.path.exists(local_dir):
-                print(f"Creating directory {local_dir}")
-                os.makedirs(local_dir, exist_ok=True)
-                
-            # Check if weights exist, if not download to target path
-            if not os.path.exists(ckpt_path):
-                # Check for alternative name just in case
-                alt_path = os.path.join(local_dir, 'dinov2_vitb14.pth')
-                if os.path.exists(alt_path):
-                    ckpt_path = alt_path
-                else:
-                    print(f"Weights not found at {ckpt_path}. Downloading...")
-                    url = "https://dl.fbaipublicfiles.com/dinov2/dinov2_vitb14/dinov2_vitb14_pretrain.pth"
-                    try:
-                        torch.hub.download_url_to_file(url, ckpt_path)
-                    except Exception as e:
-                        print(f"Error downloading to {ckpt_path}: {e}")
-                        print("Falling back to default torch hub cache...")
-                        self.base_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitb14', pretrained=True)
-                        return
-
-            print(f"Loading DINOv2 weights from {ckpt_path}")
-            self.base_model.load_state_dict(torch.load(ckpt_path))
-
-        elif network == 'dinov2_vitl14':
-            print("Loading DINOv2 Large model...")
-            # TODO(open-source): internal-cluster paths below; not load-bearing for
-            # the verified training run (NETWORK=Qwen3-VL-2B doesn't reach this
-            # branch), and already falls back to a public download further down.
-            # Low priority. See OPEN_SOURCE_PATH_TODOS.md.
-
-            # Use local source for DINOv2 to avoid network issues
-            repo_dir = '/x2robot_v2/ethanchen/code/dinov2_source'
-            if not os.path.exists(repo_dir):
-                 raise FileNotFoundError(f"DINOv2 source not found at {repo_dir}. Please clone it first.")
-            
-            print(f"Loading DINOv2 from local source: {repo_dir}")
-            self.base_model = torch.hub.load(repo_dir, 'dinov2_vitl14', source='local', pretrained=False)
-            
-            # Local paths
-            local_dir = '/x2robot_v2/ethanchen/open_ckpts/dinov2_vitl14'
-            ckpt_filename = 'dinov2_vitl14_pretrain.pth'
-            ckpt_path = os.path.join(local_dir, ckpt_filename)
-            
-            # Ensure directory exists
-            if not os.path.exists(local_dir):
-                print(f"Creating directory {local_dir}")
-                os.makedirs(local_dir, exist_ok=True)
-                
-            # Check if weights exist, if not download to target path
-            if not os.path.exists(ckpt_path):
-                # Check for alternative name just in case
-                alt_path = os.path.join(local_dir, 'dinov2_vitl14.pth')
-                if os.path.exists(alt_path):
-                    ckpt_path = alt_path
-                else:
-                    print(f"Weights not found at {ckpt_path}. Downloading...")
-                    url = "https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/dinov2_vitl14_pretrain.pth"
-                    try:
-                        torch.hub.download_url_to_file(url, ckpt_path)
-                    except Exception as e:
-                        print(f"Error downloading to {ckpt_path}: {e}")
-                        print("Falling back to default torch hub cache...")
-                        self.base_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14', pretrained=True)
-                        return
-
-            print(f"Loading DINOv2 weights from {ckpt_path}")
-            self.base_model.load_state_dict(torch.load(ckpt_path))
-
-        elif 'Qwen3-VL' in network:
+        if 'Qwen3-VL' in network:
             print(f"Loading {network}...")
             # TODO(open-source): internal-cluster path, load-bearing for the
             # verified training run — do not remove without re-verifying end-to-end.
@@ -387,198 +256,7 @@ class BaseModel(nn.Module):
                 # Return flattened embeddings as requested by train.py logic
                 return pooled_embeddings
 
-        # Standard ResNet/DINO path
-        # x: (batch_size, num_steps, C, H, W)
-        batch_size, num_steps, c, h, w = x.shape
-        x = x.view(batch_size * num_steps, c, h, w)
-        
-        network = CONFIG.MODEL.BASE_MODEL.NETWORK
-        if network in ['dinov2_vitb14', 'dinov2_vitl14']:
-            # DINOv2 forward
-            # forward_features returns dict with 'x_norm_patchtokens'
-            out = self.base_model.forward_features(x)
-            patch_tokens = out['x_norm_patchtokens'] # (B*T, N, D)
-            
-            # Reshape to (B*T, D, H_grid, W_grid)
-            # Assuming square input and patch size 14
-            # N = (H/14) * (W/14)
-            bt, n, d = patch_tokens.shape
-            h_grid = int(n**0.5)
-            w_grid = h_grid
-            
-            x = patch_tokens.permute(0, 2, 1).reshape(bt, d, h_grid, w_grid)
-        else:
-            x = self.base_model(x)
-        
-        _, c, h, w = x.shape
-        x = x.view(batch_size, num_steps, c, h, w)
-        return x
-
-class ConvEmbedder(nn.Module):
-    """Embedder network."""
-
-    def __init__(self):
-        super(ConvEmbedder, self).__init__()
-        
-        conv_params = CONFIG.MODEL.CONV_EMBEDDER_MODEL.CONV_LAYERS
-        fc_params = CONFIG.MODEL.CONV_EMBEDDER_MODEL.FC_LAYERS
-        use_bn = CONFIG.MODEL.CONV_EMBEDDER_MODEL.USE_BN
-        embedding_size = CONFIG.MODEL.CONV_EMBEDDER_MODEL.EMBEDDING_SIZE
-        cap_scalar = CONFIG.MODEL.CONV_EMBEDDER_MODEL.CAPACITY_SCALAR
-        
-        # Input channels? It comes from BaseModel.
-        # ResNet50 layer3 output has 1024 channels.
-        network = CONFIG.MODEL.BASE_MODEL.NETWORK
-        if network == 'dinov2_vitb14':
-            in_channels = 768
-        elif network == 'dinov2_vitl14':
-            in_channels = 1024
-        else:
-            in_channels = 1024 
-        
-        self.conv_layers = nn.ModuleList()
-        
-        for channels, kernel_size, activate in conv_params:
-            out_channels = int(cap_scalar * channels)
-            # TF uses 'same' padding. For kernel_size 3, padding is 1.
-            padding = kernel_size // 2
-            
-            conv = nn.Conv3d(in_channels, out_channels, kernel_size, padding=padding, bias=not use_bn)
-            layers_list = [conv]
-            if use_bn:
-                layers_list.append(nn.BatchNorm3d(out_channels))
-            if activate:
-                layers_list.append(nn.ReLU(inplace=True))
-            
-            self.conv_layers.append(nn.Sequential(*layers_list))
-            in_channels = out_channels
-            
-        self.flatten_method = CONFIG.MODEL.CONV_EMBEDDER_MODEL.FLATTEN_METHOD
-        
-        self.fc_layers = nn.ModuleList()
-        for channels, activate in fc_params:
-            out_channels = int(cap_scalar * channels)
-            layers_list = []
-            layers_list.append(nn.Linear(in_channels, out_channels))
-            if activate:
-                layers_list.append(nn.ReLU(inplace=True))
-            self.fc_layers.append(nn.Sequential(*layers_list))
-            in_channels = out_channels
-            
-        self.embedding_layer = nn.Linear(in_channels, embedding_size)
-        
-        self.base_dropout_rate = CONFIG.MODEL.CONV_EMBEDDER_MODEL.BASE_DROPOUT_RATE
-        self.fc_dropout_rate = CONFIG.MODEL.CONV_EMBEDDER_MODEL.FC_DROPOUT_RATE
-        self.l2_normalize = CONFIG.MODEL.CONV_EMBEDDER_MODEL.L2_NORMALIZE
-        self.base_dropout_spatial = CONFIG.MODEL.CONV_EMBEDDER_MODEL.BASE_DROPOUT_SPATIAL
-
-    def forward(self, x, num_frames):
-        # Ensure input dtype matches model weights
-        target_dtype = next(self.parameters()).dtype
-        if x.dtype != target_dtype:
-            x = x.to(target_dtype)
-
-        # x: (batch_size, total_num_steps, C, H, W)
-        batch_size, total_num_steps, c, h, w = x.shape
-        num_context = total_num_steps // num_frames
-        
-        # Reshape for 3D Conv: (batch_size * num_frames, C, num_context, H, W)
-        x = x.view(batch_size * num_frames, num_context, c, h, w)
-        x = x.permute(0, 2, 1, 3, 4) # (B*N, C, T, H, W)
-        
-        # Dropout
-        if self.base_dropout_rate > 0:
-             # SpatialDropout3D in TF drops entire feature maps.
-             # nn.Dropout3d in PyTorch does the same (zeroes out entire channels).
-             if self.base_dropout_spatial:
-                 x = F.dropout3d(x, p=self.base_dropout_rate, training=self.training)
-             else:
-                 x = F.dropout(x, p=self.base_dropout_rate, training=self.training)
-
-        for layer in self.conv_layers:
-            x = layer(x)
-            
-        # Spatial pooling
-        if self.flatten_method == 'max_pool':
-            # Global Max Pooling over (T, H, W)
-            x = F.adaptive_max_pool3d(x, (1, 1, 1))
-        elif self.flatten_method == 'avg_pool':
-            x = F.adaptive_avg_pool3d(x, (1, 1, 1))
-        elif self.flatten_method == 'flatten':
-            pass # Flatten handled below
-        else:
-             raise ValueError('Supported flatten methods: max_pool, avg_pool and flatten.')
-             
-        x = x.view(x.size(0), -1)
-        
-        for layer in self.fc_layers:
-            if self.fc_dropout_rate > 0:
-                x = F.dropout(x, p=self.fc_dropout_rate, training=self.training)
-            x = layer(x)
-            
-        x = self.embedding_layer(x)
-        
-        if self.l2_normalize:
-            x = F.normalize(x, p=2, dim=-1)
-            
-        return x
-
-class ConvGRUEmbedder(nn.Module):
-    """Embedder network which uses ConvGRU."""
-    # Simplified implementation using standard GRU after Conv2D
-    
-    def __init__(self):
-        super(ConvGRUEmbedder, self).__init__()
-        if CONFIG.DATA.NUM_STEPS != 1:
-             raise ValueError('Cannot use GRU with context frames.')
-             
-        conv_params = CONFIG.MODEL.CONVGRU_EMBEDDER_MODEL.CONV_LAYERS
-        use_bn = CONFIG.MODEL.CONVGRU_EMBEDDER_MODEL.USE_BN
-        gru_params = CONFIG.MODEL.CONVGRU_EMBEDDER_MODEL.GRU_LAYERS
-        
-        in_channels = 1024 # From ResNet layer3
-        
-        self.conv_layers = nn.ModuleList()
-        for channels, kernel_size, activate in conv_params:
-            padding = kernel_size // 2
-            layers_list = []
-            layers_list.append(nn.Conv2d(in_channels, channels, kernel_size, padding=padding, bias=not use_bn))
-            if use_bn:
-                layers_list.append(nn.BatchNorm2d(channels))
-            if activate:
-                layers_list.append(nn.ReLU(inplace=True))
-            self.conv_layers.append(nn.Sequential(*layers_list))
-            in_channels = channels
-            
-        self.gru_layers = nn.ModuleList()
-        for units in gru_params:
-            self.gru_layers.append(nn.GRU(input_size=in_channels, hidden_size=units, batch_first=True))
-            in_channels = units
-            
-        self.dropout_rate = CONFIG.MODEL.CONVGRU_EMBEDDER_MODEL.DROPOUT_RATE
-
-    def forward(self, x, num_frames):
-        # x: (batch_size, num_steps, C, H, W)
-        batch_size, num_steps, c, h, w = x.shape
-        x = x.view(batch_size * num_steps, c, h, w)
-        
-        for layer in self.conv_layers:
-            if self.dropout_rate > 0:
-                x = F.dropout(x, p=self.dropout_rate, training=self.training)
-            x = layer(x)
-            
-        x = F.adaptive_max_pool2d(x, (1, 1))
-        x = x.view(batch_size, num_steps, -1)
-        
-        for layer in self.gru_layers:
-            x, _ = layer(x)
-            
-        # x is (batch_size, num_steps, hidden_size)
-        # We need to flatten to (batch_size * num_steps, hidden_size) to match ConvEmbedder output style if needed
-        # But wait, ConvEmbedder returns (batch_size * num_frames, embedding_size)
-        
-        x = x.contiguous().view(batch_size * num_steps, -1)
-        return x
+        raise RuntimeError("BaseModel.forward expects Qwen dict input with a 'qwen_input' key.")
 
 class LinearEmbedder(nn.Module):
     """Simple Linear Embedder for Qwen features."""
@@ -594,14 +272,7 @@ class LinearEmbedder(nn.Module):
         if x.dtype != target_dtype:
             x = x.to(target_dtype)
 
-        # Handle both Qwen (2D: Total_Frames x C) and ResNet (5D: B x T x C x H x W) inputs
-        if x.dim() == 5:
-            # x: (B, T, C, 1, 1)
-            b, t, c, h, w = x.shape
-            x = x.view(b * t, c)
-
-        # If already 2D, straight to FC (x is [Batch*Steps, C])
-
+        # x: (Total_Frames, C)
         x = self.fc(x)
         if self.l2_normalize:
             x = F.normalize(x, p=2, dim=-1)
@@ -615,29 +286,20 @@ def get_model():
 
     cnn = BaseModel(num_steps=num_steps)
 
-    if 'Qwen' in CONFIG.MODEL.BASE_MODEL.NETWORK:
-        # Use LinearEmbedder for Qwen
-        if hasattr(cnn, 'base_model') and hasattr(cnn.base_model, 'config'):
-            config = cnn.base_model.config
-            if hasattr(config, 'hidden_size'):
-                in_channels = config.hidden_size
-            elif hasattr(config, 'd_model'):
-                in_channels = config.d_model
-            elif hasattr(config, 'text_config') and hasattr(config.text_config, 'hidden_size'):
-                in_channels = config.text_config.hidden_size
-            else:
-                in_channels = 1536
-                print(f"Warning: Could not determine hidden_size from config. Using default {in_channels}.")
+    if hasattr(cnn, 'base_model') and hasattr(cnn.base_model, 'config'):
+        config = cnn.base_model.config
+        if hasattr(config, 'hidden_size'):
+            in_channels = config.hidden_size
+        elif hasattr(config, 'd_model'):
+            in_channels = config.d_model
+        elif hasattr(config, 'text_config') and hasattr(config.text_config, 'hidden_size'):
+            in_channels = config.text_config.hidden_size
         else:
-            in_channels = 1536 # Fallback for Qwen2-VL-2B
-        emb = LinearEmbedder(in_channels)
-
-    elif CONFIG.MODEL.EMBEDDER_TYPE == 'conv':
-        emb = ConvEmbedder()
-    elif CONFIG.MODEL.EMBEDDER_TYPE == 'convgru':
-        emb = ConvGRUEmbedder()
+            in_channels = 1536
+            print(f"Warning: Could not determine hidden_size from config. Using default {in_channels}.")
     else:
-        raise ValueError('%s not supported.' % CONFIG.MODEL.EMBEDDER_TYPE)
+        in_channels = 1536 # Fallback for Qwen2-VL-2B
+    emb = LinearEmbedder(in_channels)
 
     model['cnn'] = cnn
     model['emb'] = emb

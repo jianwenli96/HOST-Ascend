@@ -26,7 +26,6 @@ whole reason this pass deferred them instead of "fixing" them blind.
 
 | File | What | Why lower priority |
 |---|---|---|
-| `alignment/models.py` (`Resnet50`/`Resnet50_pretrained` branch, `dinov2_vitb14`/`dinov2_vitl14` branches) | Hardcoded internal ResNet50/DINOv2 paths | Verified run uses `NETWORK=Qwen3-VL-2B`, never reaches these `elif` branches. Already have graceful fallback to a public download URL / torch.hub if the local path is missing — reasonably safe for external users as-is. |
 | `alignment/evaluate_v2.py:~185` | Same Qwen3-VL path, eval-only | Eval wasn't part of this session's verification scope. Apply the same fix as `models.py` when doing the consolidated pass, for consistency. |
 | `alignment/scripts/convert_ds_to_hf.sh:9`, `alignment/scripts/convert_ckpt_to_hf.py:104` | Same Qwen3-VL path, already accept a CLI override (`${2:-...}` / `argparse default=`) with this as the fallback default | Already partially configurable; lowest priority — just update the default alongside the others for consistency. |
 | `policy_training/eval/real_openloop/eval_dataset.py:~52` (`cam_mapping_dir` default) | Internal cam-mapping path default | Only exercised by real-robot open-loop eval, not the verified training run. |

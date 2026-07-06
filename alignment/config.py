@@ -14,15 +14,7 @@ CONFIG = edict()
 CONFIG.LOGDIR = '/tmp/alignment_logs/'
 # Debug mode
 CONFIG.DEBUG = False
-# Dataset for training alignment.
-CONFIG.DATASETS = [
-    'pouring',
-]
-
-# Path to tfrecords.
-CONFIG.PATH_TO_TFRECORDS = '/tmp/%s_tfrecords/'
-# Algorithm used for training: alignment, sal, alignment_sal_tcn,
-# classification, tcn . (alignment is called tcc in paper)
+# Algorithm used for training (alignment is called tcc in paper).
 CONFIG.TRAINING_ALGO = 'alignment'
 # Size of images/frames.
 CONFIG.IMAGE_SIZE = 224  # For ResNet50
@@ -57,87 +49,26 @@ CONFIG.EVAL.CHUNK_PROBS = [0.0, 0.0, 1.0]  # Force 4x multiplier (96 frames tota
 CONFIG.EVAL.REF_CACHE_MAXSIZE = 48        # max cached sample-level ref embeddings
 CONFIG.EVAL.REF_CACHE_MAIN_ONLY = False     # use main-only Qwen input when all refs are cached
 
-CONFIG.EVAL.VAL_ITERS = 20
 # If True (eval + distributed), each rank gets a contiguous index range of the
 # dataset (JSON order) instead of PyTorch DistributedSampler's strided indices.
 CONFIG.EVAL.CONTIGUOUS_DISTRIBUTED_SHARD = False
-# A task evaluates the embeddings or the trained model.
-CONFIG.EVAL.TASKS = [
-    'algo_loss',
-    'classification',
-    'kendalls_tau',
-    'event_completion',
-    'few_shot_classification'
-]
 
 # DTW alignment settings (will be set after CONFIG.ALIGNMENT is defined)
 CONFIG.EVAL.USE_DTW = True
 CONFIG.EVAL.DTW_WINDOW = None
-
-CONFIG.EVAL.FRAMES_PER_BATCH = 25
-CONFIG.EVAL.KENDALLS_TAU_STRIDE = 5  # 5 for Pouring, 2 for PennAction
-CONFIG.EVAL.KENDALLS_TAU_DISTANCE = 'sqeuclidean'  # cosine, sqeuclidean
-CONFIG.EVAL.CLASSIFICATION_FRACTIONS = [0.1, 0.5, 1.0]
-CONFIG.EVAL.FEW_SHOT_NUM_LABELED = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-CONFIG.EVAL.FEW_SHOT_NUM_EPISODES = 50
 
 # ******************************************************************************
 # Model params
 # ******************************************************************************
 CONFIG.MODEL = edict()
 
-CONFIG.MODEL.EMBEDDER_TYPE = 'conv'
-
 CONFIG.MODEL.BASE_MODEL = edict()
-# Resnet50, VGGM
-CONFIG.MODEL.BASE_MODEL.NETWORK = 'Resnet50_pretrained'
-# conv4_block3_out, conv4 (respective layers in networks)
-CONFIG.MODEL.BASE_MODEL.LAYER = 'conv4_block3_out'
+CONFIG.MODEL.BASE_MODEL.NETWORK = 'Qwen3-VL-2B'
 
-# Select which layers to train.
-# 'frozen' : Weights are fixed and batch_norm stats are also fixed.
-# 'train_all': Everything is trained and batch norm stats are updated.
-# 'only_bn': Only tune batch_norm variables and update batch norm stats.
-CONFIG.MODEL.TRAIN_BASE = 'only_bn'
-CONFIG.MODEL.TRAIN_EMBEDDING = True
-
-CONFIG.MODEL.RESNET_PRETRAINED_WEIGHTS = '/tmp/resnet50v2_weights_tf_dim_ordering_tf_kernels_notop.h5'
-
-# VGG_M-esque model
-CONFIG.MODEL.VGGM = edict()
-CONFIG.MODEL.VGGM.USE_BN = True
-
+# Embedder params (LinearEmbedder, applied on top of the Qwen backbone).
 CONFIG.MODEL.CONV_EMBEDDER_MODEL = edict()
-# List of conv layers defined as (channels, kernel_size, activate).
-CONFIG.MODEL.CONV_EMBEDDER_MODEL.CONV_LAYERS = [
-    (256, 3, True),
-    (256, 3, True),
-]
-CONFIG.MODEL.CONV_EMBEDDER_MODEL.FLATTEN_METHOD = 'max_pool'
-# List of fc layers defined as (channels, activate).
-CONFIG.MODEL.CONV_EMBEDDER_MODEL.FC_LAYERS = [
-    (256, True),
-    (256, True),
-]
-CONFIG.MODEL.CONV_EMBEDDER_MODEL.CAPACITY_SCALAR = 2
 CONFIG.MODEL.CONV_EMBEDDER_MODEL.EMBEDDING_SIZE = 128
 CONFIG.MODEL.CONV_EMBEDDER_MODEL.L2_NORMALIZE = False
-CONFIG.MODEL.CONV_EMBEDDER_MODEL.BASE_DROPOUT_RATE = 0.0
-CONFIG.MODEL.CONV_EMBEDDER_MODEL.BASE_DROPOUT_SPATIAL = False
-CONFIG.MODEL.CONV_EMBEDDER_MODEL.FC_DROPOUT_RATE = 0.1
-CONFIG.MODEL.CONV_EMBEDDER_MODEL.USE_BN = True
-
-# Conv followed by GRU Embedder
-CONFIG.MODEL.CONVGRU_EMBEDDER_MODEL = edict()
-# List of conv layers defined as (channels, kernel_size, activate).
-CONFIG.MODEL.CONVGRU_EMBEDDER_MODEL.CONV_LAYERS = [(512, 3, True),
-                                                   (512, 3, True)]
-# List of fc layers defined as (channels, activate).
-CONFIG.MODEL.CONVGRU_EMBEDDER_MODEL.GRU_LAYERS = [
-    128,
-]
-CONFIG.MODEL.CONVGRU_EMBEDDER_MODEL.DROPOUT_RATE = 0.0
-CONFIG.MODEL.CONVGRU_EMBEDDER_MODEL.USE_BN = True
 
 # ******************************************************************************
 # Alignment params
@@ -199,59 +130,6 @@ CONFIG.ALIGNMENT.SAVE_RAW_SIM12_DIR = ""  # e.g. under run log dir: "saved_sim12
 CONFIG.ALIGNMENT.SAVE_RAW_SIM12_EVERY = 1000  # save when global_step % EVERY == 0; use 1 for every step
 CONFIG.ALIGNMENT.SAVE_RAW_SIM12_MAX_BATCH = None  # None = full batch; int = first N samples only
 # ******************************************************************************
-# Shuffle and Learn params
-# ******************************************************************************
-CONFIG.SAL = edict()
-CONFIG.SAL.DROPOUT_RATE = 0.0
-# List of fc layers defined as (channels, activate).
-CONFIG.SAL.FC_LAYERS = [(128, True), (64, True), (2, False)]
-CONFIG.SAL.SHUFFLE_FRACTION = 0.75
-# Number of triplets to sample from each video in batch.
-CONFIG.SAL.NUM_SAMPLES = 8
-CONFIG.SAL.LABEL_SMOOTHING = 0.0
-
-# ******************************************************************************
-# Alignment and Shuffle and Learn and TCN params
-# ******************************************************************************
-CONFIG.ALIGNMENT_SAL_TCN = edict()
-# The weight for the tcn loss is (1 - alignment_loss_weight - sal_loss_weight)
-CONFIG.ALIGNMENT_SAL_TCN.ALIGNMENT_LOSS_WEIGHT = 0.33
-CONFIG.ALIGNMENT_SAL_TCN.SAL_LOSS_WEIGHT = 0.33
-
-# ******************************************************************************
-# Classification/Supervised Learning of Per-frame Classes params
-# ******************************************************************************
-CONFIG.CLASSIFICATION = edict()
-CONFIG.CLASSIFICATION.LABEL_SMOOTHING = 0.0
-CONFIG.CLASSIFICATION.DROPOUT_RATE = 0.0
-
-# ******************************************************************************
-# Time Contrastive Network params
-# ******************************************************************************
-CONFIG.TCN = edict()
-CONFIG.TCN.POSITIVE_WINDOW = 5
-CONFIG.TCN.REG_LAMBDA = 0.002
-
-# ******************************************************************************
-# Optimizer params
-# ******************************************************************************
-CONFIG.OPTIMIZER = edict()
-# Supported optimizers are: AdamOptimizer, MomentumOptimizer
-CONFIG.OPTIMIZER.TYPE = 'AdamOptimizer'
-
-CONFIG.OPTIMIZER.LR = edict()
-# Learning rate decay strategy.
-# Currently Supported strategies: fixed, exp_decay, manual, warmup_cosine
-# CONFIG.OPTIMIZER.LR.DECAY_TYPE = 'warmup_cosine'
-# CONFIG.OPTIMIZER.LR.EXP_DECAY_RATE = 0.97
-# CONFIG.OPTIMIZER.LR.EXP_DECAY_STEPS = 1000
-# CONFIG.OPTIMIZER.LR.MANUAL_LR_STEP_BOUNDARIES = [5000, 10000]
-# CONFIG.OPTIMIZER.LR.MANUAL_LR_DECAY_RATE = 0.1
-# CONFIG.OPTIMIZER.LR.NUM_WARMUP_STEPS = 0
-# CONFIG.OPTIMIZER.LR.WARMUP_FRACTION = 0.1
-# CONFIG.OPTIMIZER.LR.END_LR = 0.000003
-
-# ******************************************************************************
 # Special Token IDs for Qwen3-VL
 # ******************************************************************************
 CONFIG.SPECIAL_TOKENS = edict()
@@ -262,8 +140,6 @@ CONFIG.SPECIAL_TOKENS.ALIGN_END_TOKEN_ID = 151662  # <|fim_pad|> - 用于标记 
 # Data params
 # ******************************************************************************
 CONFIG.DATA = edict()
-CONFIG.DATA.SHUFFLE_QUEUE_SIZE = 0
-CONFIG.DATA.NUM_PREFETCH_BATCHES = 1
 CONFIG.DATA.RANDOM_OFFSET = 1
 CONFIG.DATA.STRIDE = 16
 CONFIG.DATA.SAMPLING_STRATEGY = 'offset_uniform'  # offset_uniform, stride
@@ -285,7 +161,6 @@ CONFIG.DATA.CHUNK_INTRA_ATTENTION = 'full'  # 'causal' | 'full'
 # Set this to False if your TFRecords don't have per-frame labels.
 CONFIG.DATA.FRAME_LABELS = True
 CONFIG.DATA.PER_DATASET_FRACTION = 1.0  # Use 0 to use only one sample.
-CONFIG.DATA.PER_CLASS = False
 # stride of frames while embedding a video during evaluation.
 CONFIG.DATA.SAMPLE_ALL_STRIDE = 1
 
@@ -445,9 +320,6 @@ CONFIG.AUGMENTATION.CONTRAST_UPPER = 1.5
 CONFIG.AUGMENTATION.SATURATION_LOWER = 0.5
 CONFIG.AUGMENTATION.SATURATION_UPPER = 1.5
 
-# --- Part 2: Legacy / Not Used (Placeholders from older versions) ---
-# Note: Currently all important params are in Part 1.
-
 # ******************************************************************************
 # Logging params
 # ******************************************************************************
@@ -512,9 +384,6 @@ CONFIG.JOINTS.JOINT_TOKEN_START_ID = 151669   # first unused ID in Qwen3 vocab (
 # Sync params from DS_CONFIG to other configs to avoid redundancy
 # ******************************************************************************
 CONFIG.TRAIN.BATCH_SIZE = CONFIG.DS_CONFIG.train_micro_batch_size_per_gpu
-CONFIG.OPTIMIZER.CLIP_GRAD_NORM = CONFIG.DS_CONFIG.gradient_clipping
-CONFIG.OPTIMIZER.LR.INITIAL_LR = CONFIG.DS_CONFIG.optimizer.params.lr
-CONFIG.MODEL.L2_REG_WEIGHT = CONFIG.DS_CONFIG.optimizer.params.weight_decay
 CONFIG.TRAIN.MAX_ITERS = CONFIG.DS_CONFIG.scheduler.params.total_num_steps
 
 # ******************************************************************************
