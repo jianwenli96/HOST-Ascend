@@ -201,11 +201,7 @@ def align_pair_of_sequences(embs1,
                             steps2=None,
                             seq_lens2=None,
                             normalize_indices=False,
-                            forward_variance_lambda=0.0,
-                            tokens1=None,
-                            tokens2=None,
-                            gate_module=None,
-                            precomputed_gates=None):
+                            forward_variance_lambda=0.0):
   """Align a given pair embedding sequences."""
   max_num_steps = embs1.size(-2)
 
@@ -251,22 +247,6 @@ def align_pair_of_sequences(embs1,
   else:
       softmaxed_sim_12 = F.softmax(sim_12, dim=-1)
   check_nan(softmaxed_sim_12, "softmaxed_sim_12", "align_pair_of_sequences")
-  
-  # Apply Attention Gate if available
-  if (precomputed_gates is not None) or (gate_module is not None and tokens1 is not None and tokens2 is not None):
-      if precomputed_gates is not None:
-          gates = precomputed_gates
-      else:
-          # gates: (B, T1, T2, 1)
-          gates = gate_module(tokens1, tokens2)
-      gate_12 = gates.squeeze(-1) # (B, T1, T2)
-      softmaxed_sim_12 = softmaxed_sim_12 * gate_12
-      # Re-normalize to ensure it's still a valid probability distribution
-      softmaxed_sim_12 = softmaxed_sim_12 / (softmaxed_sim_12.sum(dim=-1, keepdim=True) + 1e-8)
-      check_nan(softmaxed_sim_12, "softmaxed_sim_12_gated", "align_pair_of_sequences")
-  else:
-    pass
-    #   print("Warning: No attention gate module or precomputed gates provided for alignment.")
 
   forward_var_loss, _, var_mean = _compute_variance_loss(
       softmaxed_sim_12, steps2, seq_lens2, normalize_indices, forward_variance_lambda)
@@ -498,10 +478,6 @@ def compute_deterministic_alignment_loss_paired(embs_main,
                                                 causal_lambda=0.0,
                                                 causal_margin=0.05,
                                                 forward_variance_lambda=0.0,
-                                                raw_tokens_main=None,
-                                                raw_tokens_ref=None,
-                                                gate_module=None,
-                                                precomputed_gates=None,
                                                 global_step=None,
                                                 training=True):
   """Compute cycle-consistency loss for paired sequences (Main <-> Ref)."""
@@ -512,38 +488,19 @@ def compute_deterministic_alignment_loss_paired(embs_main,
   direction_main = None
   direction_ref  = None
 
-  # Extract precomputed gates for MR and RM directions if available
-  precomputed_gates_mr = None
-  precomputed_gates_rm = None
-  if precomputed_gates is not None:
-      if isinstance(precomputed_gates, dict):
-          precomputed_gates_mr = precomputed_gates.get('mr')
-          precomputed_gates_rm = precomputed_gates.get('rm')
-      else:
-          # Fallback for tensor input
-          precomputed_gates_mr = precomputed_gates
-          precomputed_gates_rm = precomputed_gates.transpose(1, 2)
-          print("Warning: precomputed_gates should be a dict with 'mr' and 'rm' keys for paired alignment.")
-
   # --- 1. Main -> Ref -> Main (Backward Cycle) ---
   logits_mr, labels_mr, sim_mr, var_loss_mr, stats_mr, raw_sim_mr, path_cost_mr = align_pair_of_sequences(
       embs_main, embs_ref, similarity_type, temperature,
       steps2=steps_ref, seq_lens2=seq_lens_ref,
       normalize_indices=normalize_indices,
-      forward_variance_lambda=forward_variance_lambda,
-      tokens1=raw_tokens_main, tokens2=raw_tokens_ref,
-      gate_module=gate_module,
-      precomputed_gates=precomputed_gates_mr)
+      forward_variance_lambda=forward_variance_lambda)
 
   # --- 2. Ref -> Main -> Ref (Forward Cycle) ---
   logits_rm, labels_rm, sim_rm, var_loss_rm, stats_rm, raw_sim_rm, path_cost_rm = align_pair_of_sequences(
       embs_ref, embs_main, similarity_type, temperature,
       steps2=steps_main, seq_lens2=seq_lens_main,
       normalize_indices=normalize_indices,
-      forward_variance_lambda=forward_variance_lambda,
-      tokens1=raw_tokens_ref, tokens2=raw_tokens_main,
-      gate_module=gate_module,
-      precomputed_gates=precomputed_gates_rm)
+      forward_variance_lambda=forward_variance_lambda)
 
   # --- DTW Indices Extraction (Compute ONCE and reuse for loss/logging) ---
   # Always compute DTW indices for logging, regardless of config

@@ -74,8 +74,6 @@ class Algorithm(nn.Module):
         if isinstance(self.model, dict):
             self.cnn = self.model['cnn']
             self.emb = self.model['emb']
-            if 'gate' in self.model:
-                self.gate = self.model['gate']
         else:
             # If it's already a module
             pass
@@ -112,14 +110,6 @@ class Algorithm(nn.Module):
                 data['qwen_input'] = data.get('qwen_input_paired', data['qwen_input'])
 
         cnn_feats = get_cnn_feats(self.cnn, data, training)
-        
-        raw_tokens_dict = None
-        if isinstance(cnn_feats, dict) and 'embeddings' in cnn_feats:
-            raw_tokens_dict = {
-                'mains_tokens': cnn_feats['mains_tokens'],
-                'refs_tokens': cnn_feats['refs_tokens']
-            }
-            cnn_feats = cnn_feats['embeddings']
 
         embs = self.emb(cnn_feats, num_steps)
         
@@ -151,7 +141,7 @@ class Algorithm(nn.Module):
             for i, rp in enumerate(ref_paths):
                 self._ref_cache.put(rp, embs_ref[i])
 
-        # --- Merge Chunks and Call Gate in Forward ---
+        # --- Merge Chunks ---
         # qwen_meta must come from paired data so that group_ids/chunk_ids describe both halves
         qwen_meta = (data.get('qwen_input_paired') or data.get('qwen_input')) \
                     if isinstance(data, dict) else None
@@ -169,14 +159,7 @@ class Algorithm(nn.Module):
             
             new_embs_main, new_steps_main, new_seq_lens_main = [], [], []
             new_embs_ref, new_steps_ref, new_seq_lens_ref = [], [], []
-            new_tokens_m, new_tokens_r = [], []
             merged_meta_list = []
-
-            # Handle tokens if present
-            m_tokens_all, r_tokens_all = None, None
-            if raw_tokens_dict is not None:
-                m_tokens_all = raw_tokens_dict['mains_tokens'].view(-1, num_steps, raw_tokens_dict['mains_tokens'].shape[-2], raw_tokens_dict['mains_tokens'].shape[-1])
-                r_tokens_all = raw_tokens_dict['refs_tokens'].view(-1, num_steps, raw_tokens_dict['refs_tokens'].shape[-2], raw_tokens_dict['refs_tokens'].shape[-1])
 
             for gid in unique_gids:
                 mask = (gids == gid)
@@ -195,13 +178,6 @@ class Algorithm(nn.Module):
                 curr_steps_r = steps_ref[mask][chunk_idx]
                 new_steps_ref.append(curr_steps_r.reshape(-1))
                 new_seq_lens_ref.append(seq_lens_ref[mask][0])
-
-                # Merge Tokens
-                if m_tokens_all is not None:
-                    curr_tokens_m = m_tokens_all[mask][chunk_idx]
-                    new_tokens_m.append(curr_tokens_m.reshape(-1, curr_tokens_m.size(-2), curr_tokens_m.size(-1)))
-                    curr_tokens_r = r_tokens_all[mask][chunk_idx]
-                    new_tokens_r.append(curr_tokens_r.reshape(-1, curr_tokens_r.size(-2), curr_tokens_r.size(-1)))
 
                 # Merge Metadata for logging
                 first_idx = mask.nonzero(as_tuple=True)[0][chunk_idx[0]].item()
@@ -230,46 +206,12 @@ class Algorithm(nn.Module):
             steps_ref = torch.stack(new_steps_ref)
             seq_lens_main = torch.stack(new_seq_lens_main)
             seq_lens_ref = torch.stack(new_seq_lens_ref)
-            
-            tokens_m, tokens_r = None, None
-            if new_tokens_m:
-                tokens_m = torch.stack(new_tokens_m)
-                tokens_r = torch.stack(new_tokens_r)
-            
-            # Pre-compute gates while parameters are gathered in Forward pass
-            gates = None
-            if hasattr(self, 'gate') and self.gate is not None and tokens_m is not None:
-                # tokens_m/r: (B_merged, T_merged, P, D)
-                # Corresponding gates: Main as Query for MR, Ref as Query for RM
-                gates_mr = self.gate(tokens_m, tokens_r)
-                gates_rm = self.gate(tokens_r, tokens_m)
-                gates = {
-                    'mr': gates_mr,
-                    'rm': gates_rm
-                }
 
             return {
                 'embs': torch.cat([embs_main, embs_ref], dim=0),
                 'steps': torch.cat([steps_main, steps_ref], dim=0),
                 'seq_lens': torch.cat([seq_lens_main, seq_lens_ref], dim=0),
-                'gates': gates,
                 'merged_metadata': merged_meta_list,
-                'raw_tokens': {
-                    'mains_tokens': tokens_m,
-                    'refs_tokens': tokens_r
-                } if tokens_m is not None else None,
-            }
-
-        if raw_tokens_dict is not None:
-            # Reshape tokens: (B, T, P, D)
-            m_tokens = raw_tokens_dict['mains_tokens'].view(-1, num_steps, raw_tokens_dict['mains_tokens'].shape[-2], raw_tokens_dict['mains_tokens'].shape[-1])
-            r_tokens = raw_tokens_dict['refs_tokens'].view(-1, num_steps, raw_tokens_dict['refs_tokens'].shape[-2], raw_tokens_dict['refs_tokens'].shape[-1])
-            return {
-                'embs': embs,
-                'raw_tokens': {
-                    'mains_tokens': m_tokens,
-                    'refs_tokens': r_tokens
-                },
             }
 
         return embs

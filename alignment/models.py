@@ -261,9 +261,7 @@ class BaseModel(nn.Module):
 
                 all_mains_embs = []
                 all_refs_embs = []
-                all_mains_tokens = []
-                all_refs_tokens = []
-                
+
                 # Qwen3-VL 4x temporal compression: 4 frames -> 1 token
                 # Each group is now a video of 4 frames, which results in vision tokens
                 # followed by a <|file_sep|> (CLS token).
@@ -274,7 +272,6 @@ class BaseModel(nn.Module):
                     hs_b = hidden_states[b]
                     
                     sample_embs = []
-                    sample_tokens = []
 
                     # 1. Try CLS Extraction (Preferred)
                     # We expect exactly n_m + n_r CLS tokens (one after each group video)
@@ -283,71 +280,34 @@ class BaseModel(nn.Module):
                         # The first few CLS tokens might belong to the align video if it was processed similarly,
                         # but in AlignmentCollator, only chunk_imgs (groups) have <|file_sep|> after them.
                         # The initial video_imgs (align) does NOT have <|file_sep|> after it in content.
-                        
+
                         for g in range(min(len(cls_indices), n_m + n_r)):
                             idx = cls_indices[g]
                             emb = hs_b[idx]
-                            
+
                             if CONFIG.DEBUG:
                                 check_nan(emb, f'cls_emb_b{b}_g{g}', 'BaseModel.forward CLS extraction')
 
                             sample_embs.append(emb)
-                            # For AttentionGate, use single CLS token
-                            sample_tokens.append(hs_b[idx:idx+1]) # (1, D)
-                    
+
                     # 2. Warning if CLS not found or incomplete
                     if len(sample_embs) < (n_m + n_r):
                         print(f"Warning: Incomplete CLS tokens found for batch {b}. Expected {n_m + n_r}, found {len(sample_embs)}.")
                         # Fill remaining with zeros to avoid shape mismatch
                         for _ in range(len(sample_embs), n_m + n_r):
                             sample_embs.append(torch.zeros(hs_b.shape[-1], device=hs_b.device, dtype=hs_b.dtype))
-                            sample_tokens.append(torch.zeros((1, hs_b.shape[-1]), device=hs_b.device, dtype=hs_b.dtype))
 
                     # Split
                     all_mains_embs.extend(sample_embs[:n_m])
                     all_refs_embs.extend(sample_embs[n_m:])
-                    all_mains_tokens.extend(sample_tokens[:n_m])
-                    all_refs_tokens.extend(sample_tokens[n_m:])
-                    
+
                 # Concatenate in order [All_Mains, All_Refs] to match Original Flattening
                 final_list = all_mains_embs + all_refs_embs
                 if final_list:
                     pooled_embeddings = torch.stack(final_list) # (2BT, H)
                 else:
                     pooled_embeddings = torch.empty(0, hidden_states.shape[-1], device=hidden_states.device)
-                
-                if CONFIG.ALIGNMENT.USE_ATTN_GATE:
-                    # Return both embeddings and raw tokens for gating
-                    # We need to reshape tokens safely. Since we use IMAGE_SIZE=224, 
-                    # they should have same P. 
-                    # We check and pad if necessary.
-                    max_p = max([t.size(0) for t in all_mains_tokens + all_refs_tokens])
-                    def pad_tokens(t_list, p_len):
-                        padded = []
-                        for t in t_list:
-                            if t.size(0) < p_len:
-                                # Pad with zeros
-                                padding = torch.zeros((p_len - t.size(0)), t.size(1), device=t.device, dtype=t.dtype)
-                                padded.append(torch.cat([t, padding], dim=0))
-                            else:
-                                padded.append(t[:p_len])
-                        return torch.stack(padded)
-                    
-                    mains_tokens_tensor = pad_tokens(all_mains_tokens, max_p)
-                    refs_tokens_tensor = pad_tokens(all_refs_tokens, max_p)
-                    
-                    batch_size = input_ids.shape[0]
-                    # Reshape to (B, T, P, D)
-                    # Note: all_mains_tokens was extend, so it's a list. 
-                    # The T might vary per sample in dataset, but for now we assume uniform for tensor construction
-                    # or we return a list. TCC logic handles list better? No, usually prefers tensors.
-                    
-                    return {
-                        'embeddings': pooled_embeddings,
-                        'mains_tokens': mains_tokens_tensor,
-                        'refs_tokens': refs_tokens_tensor
-                    }
-                    
+
                 return pooled_embeddings
 
             else:
@@ -629,12 +589,6 @@ class LinearEmbedder(nn.Module):
         self.l2_normalize = CONFIG.MODEL.CONV_EMBEDDER_MODEL.L2_NORMALIZE
 
     def forward(self, x, num_frames):
-        # Handle dictionary input (e.g. from Attention Gate)
-        extra_info = {}
-        if isinstance(x, dict):
-            extra_info = x
-            x = x['embeddings']
-            
         # Ensure input dtype matches model weights
         target_dtype = next(self.parameters()).dtype
         if x.dtype != target_dtype:
@@ -645,70 +599,14 @@ class LinearEmbedder(nn.Module):
             # x: (B, T, C, 1, 1)
             b, t, c, h, w = x.shape
             x = x.view(b * t, c)
-        
+
         # If already 2D, straight to FC (x is [Batch*Steps, C])
-        
+
         x = self.fc(x)
         if self.l2_normalize:
             x = F.normalize(x, p=2, dim=-1)
-            
-        if extra_info:
-            # Update embeddings in dictionary and return
-            extra_info['embeddings'] = x
-            # Rename key for compatibility if needed, but 'embeddings' is standard
-            return extra_info
-            
+
         return x
-
-class AttentionGate(nn.Module):
-    def __init__(self, in_channels, d_model=256, nhead=8, num_layers=4, dim_feedforward=512):
-        super(AttentionGate, self).__init__()
-        # Project high-dim Qwen tokens (e.g. 1536) to a smaller d_model (256) for efficiency
-        self.compress = nn.Linear(in_channels, d_model)
-        
-        # Use standard Transformer Decoder for cross-attention
-        # tgt = main video patches, memory = reference video patches
-        decoder_layer = nn.TransformerDecoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=dim_feedforward,
-            batch_first=True,
-            norm_first=True
-        )
-        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
-        
-        # Final projection to distance/weight scalar
-        self.gate_head = nn.Linear(d_model, 1)
-
-    def forward(self, tokens_m, tokens_r):
-        """
-        Gives a gate for every pair of frames between main and ref.
-        tokens_m: (B, T_m, P, in_channels)
-        tokens_r: (B, T_r, P, in_channels)
-        Returns: (B, T_m, T_r, 1)
-        """
-        # Compress tokens to d_model first
-        tokens_m = self.compress(tokens_m)
-        tokens_r = self.compress(tokens_r)
-
-        B, Tm, P, D = tokens_m.shape
-        Tr = tokens_r.shape[1]
-        
-        # Prepare inputs: Cross-attention computed for all Tm * Tr pairs.
-        # We process all transition pairs in a single large batch dimension.
-        tgt = tokens_m.unsqueeze(2).expand(-1, -1, Tr, -1, -1).reshape(B * Tm * Tr, P, D)
-        memory = tokens_r.unsqueeze(1).expand(-1, Tm, -1, -1, -1).reshape(B * Tm * Tr, P, D)
-        
-        # Multi-layer Transformer (Cross-Attention + Norms + Add + FFN)
-        output = self.decoder(tgt, memory) # (B * Tm * Tr, P, D)
-        
-        # Pool patches (mean) to get a feature vector per frame-pair
-        pair_feats = output.mean(dim=1) # (B * Tm * Tr, D)
-        
-        # Linear + Sigmoid to get scalar gate in range [0, 1]
-        gates = torch.sigmoid(self.gate_head(pair_feats)) # (B * Tm * Tr, 1)
-        
-        return gates.view(B, Tm, Tr, 1)
 
 def get_model():
     """Returns model dict."""
@@ -733,20 +631,7 @@ def get_model():
         else:
             in_channels = 1536 # Fallback for Qwen2-VL-2B
         emb = LinearEmbedder(in_channels)
-        
-        # Add Transformer Gate if enabled
-        if CONFIG.ALIGNMENT.USE_ATTN_GATE:
-            gate_d_model = CONFIG.ALIGNMENT.GATE_HIDDEN_DIM # E.g. 256
-            gate_heads = CONFIG.ALIGNMENT.GATE_HEADS
-            gate_layers = CONFIG.ALIGNMENT.get('GATE_LAYERS', 1)
-            model['gate'] = AttentionGate(
-                in_channels, 
-                d_model=gate_d_model,
-                nhead=gate_heads, 
-                num_layers=gate_layers, 
-                dim_feedforward=gate_d_model * 2
-            )
-            
+
     elif CONFIG.MODEL.EMBEDDER_TYPE == 'conv':
         emb = ConvEmbedder()
     elif CONFIG.MODEL.EMBEDDER_TYPE == 'convgru':

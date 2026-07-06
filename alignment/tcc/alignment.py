@@ -27,9 +27,6 @@ def compute_alignment_loss(embs,
                            causal_lambda=0.0,
                            causal_margin=0.05,
                            forward_variance_lambda=0.0,
-                           raw_tokens=None,
-                           gate_module=None,
-                           precomputed_gates=None,
                            global_step=None,
                            training=True):
   """Computes alignment loss between sequences of embeddings."""
@@ -51,12 +48,6 @@ def compute_alignment_loss(embs,
       seq_lens_main = seq_lens[:real_batch_size]
       seq_lens_ref = seq_lens[real_batch_size:]
 
-      raw_tokens_main = None
-      raw_tokens_ref = None
-      if raw_tokens is not None:
-          raw_tokens_main = raw_tokens['mains_tokens']
-          raw_tokens_ref = raw_tokens['refs_tokens']
-
       # --- REDUNDANT MERGING REMOVED: Rely on Algorithm.forward() for merging ---
       # In ZeRO-3, merging must happen in forward().
       loss, loss_dict = compute_deterministic_alignment_loss_paired(
@@ -67,10 +58,6 @@ def compute_alignment_loss(embs,
           tcc_regression_margin=tcc_regression_margin,
           causal_lambda=causal_lambda, causal_margin=causal_margin,
           forward_variance_lambda=forward_variance_lambda,
-          raw_tokens_main=raw_tokens_main,
-          raw_tokens_ref=raw_tokens_ref,
-          gate_module=gate_module,
-          precomputed_gates=precomputed_gates,
           global_step=global_step,
           training=training)
       

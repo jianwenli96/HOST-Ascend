@@ -23,7 +23,7 @@ coupled prediction targets.
 alignment/
 ├── train.py                  # Training entrypoint
 ├── evaluate_v2.py             # Evaluation entrypoint
-├── models.py                  # BaseModel, embedders, AttentionGate
+├── models.py                  # BaseModel, embedders
 ├── datasets.py                # AlignmentDataset / AlignmentVideoDataset, AlignmentCollator
 ├── config.py                  # CONFIG.* — data/training/model hyperparameters
 ├── tcc/                       # Smooth DTW + TCC loss implementations
