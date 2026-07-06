@@ -29,7 +29,7 @@ flags.DEFINE_boolean(
     'train_logs exist. Useful if one has to resume training. '
     'By default switched off to prevent overwriting existing '
     'experiments.')
-flags.DEFINE_string('network', 'Qwen3-VL-2B', 'Base network to use (must contain "Qwen3-VL").')
+flags.DEFINE_string('network', 'Qwen3-VL-Embedding-8B', 'Base network to use (must contain "Qwen3-VL").')
 flags.DEFINE_string('video_paths', None, 'Comma-separated list of paths to video_paths.json.')
 flags.DEFINE_integer('local_rank', -1, 'Local rank for distributed training')
 flags.DEFINE_integer('gradient_accumulation_steps', 1, 'Gradient accumulation steps.')
@@ -220,7 +220,7 @@ def train(argv):
   processor = None
   if 'Qwen' in CONFIG.MODEL.BASE_MODEL.NETWORK:
       try:
-          # Use local path for Qwen3-VL-2B
+          # Use local path for Qwen3-VL-Embedding-8B
           # TODO(open-source): internal-cluster path, load-bearing for the verified
           # training run — do not remove without re-verifying end-to-end. Same fix as
           # models.py (env var + public HF fallback). See OPEN_SOURCE_PATH_TODOS.md.

@@ -53,7 +53,7 @@ CONFIG.EVAL.CONTIGUOUS_DISTRIBUTED_SHARD = False
 CONFIG.MODEL = edict()
 
 CONFIG.MODEL.BASE_MODEL = edict()
-CONFIG.MODEL.BASE_MODEL.NETWORK = 'Qwen3-VL-2B'
+CONFIG.MODEL.BASE_MODEL.NETWORK = 'Qwen3-VL-Embedding-8B'
 
 # Embedder params (LinearEmbedder, applied on top of the Qwen backbone).
 CONFIG.MODEL.CONV_EMBEDDER_MODEL = edict()

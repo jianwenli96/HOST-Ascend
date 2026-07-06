@@ -82,14 +82,14 @@ bash train_scripts/run_ds_10042.sh
 ```
 
 This wraps `train.py` with `torchrun` + DeepSpeed ZeRO-3. Key flags (see `train.py --help` for the
-full list): `--video_paths` (required), `--network` (`Qwen3-VL-2B` is the verified path),
+full list): `--video_paths` (required), `--network` (`Qwen3-VL-Embedding-8B` is the verified path),
 `--gradient_accumulation_steps`, `--ds_config`, `--save_interval`, `--max_iters`, `--resume_dir`,
 `--pretrain_weights`. `WANDB_API_KEY` falls back to offline logging if unset.
 
 ## Evaluation
 
 ```bash
-python evaluate_v2.py --video_paths <your_video_paths.json> --network Qwen3-VL-2B --resume_dir <checkpoint_dir>
+python evaluate_v2.py --video_paths <your_video_paths.json> --network Qwen3-VL-Embedding-8B --resume_dir <checkpoint_dir>
 ```
 
 Evaluates alignment quality (embedding-space nearest-neighbor correspondence) between Main and

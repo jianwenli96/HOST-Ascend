@@ -45,7 +45,7 @@ WORLD_SIZE=${WORLD_SIZE:-1}
 RANK=${RANK:-0}
 
 # Define default arguments
-NETWORK="Qwen3-VL-2B"
+NETWORK="Qwen3-VL-Embedding-8B"
 # Evaluation dataset path — pass your own via --video_paths
 VIDEO_PATHS=""
 

@@ -93,7 +93,7 @@ WORLD_SIZE=${WORLD_SIZE:-1}
 RANK=${RANK:-0}
 
 # Define arguments
-NETWORK="Qwen3-VL-2B"
+NETWORK="Qwen3-VL-Embedding-8B"
 VIDEO_PATHS="/open_data/cgy/processed_data/video_paths_basket/clean/10042_video_paths.json"
 # VIDEO_PATHS="/open_data/cgy/processed_data/video_paths_basket/clean/rt1_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/fmb_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/SSv2_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/bridgev2_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/calvin_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/libero_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/maniskill_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/droid_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/robocoin_video_paths.json"
 # VIDEO_PATHS="/open_data/cgy/processed_data/video_paths_basket/libero_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/berkeley_autolab_ur5_video_paths.json"
