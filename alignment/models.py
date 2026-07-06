@@ -3,7 +3,6 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.distributed as dist
 import os
 from transformers import AutoModelForCausalLM, AutoProcessor
@@ -14,7 +13,6 @@ except ImportError:
 
 from monkey_patch_forward import replace_qwen3_with_mixed_modality_forward
 from config import CONFIG
-from utils import check_nan
 
 class BaseModel(nn.Module):
     """CNN to extract features from frames."""
@@ -93,9 +91,6 @@ class BaseModel(nn.Module):
             # Extract features: Average pool image tokens from last hidden state
             # Qwen3VLCausalLMOutputWithPast does not have last_hidden_state attribute, use hidden_states[-1]
             hidden_states = outputs.hidden_states[-1] # (Total_Frames, Seq_Len, Hidden_Size)
-            
-            if CONFIG.DEBUG:
-                check_nan(hidden_states, 'qwen_hidden_states', 'BaseModel.forward')
 
             input_ids = inputs['input_ids']
             
@@ -153,9 +148,6 @@ class BaseModel(nn.Module):
                         for g in range(min(len(cls_indices), n_m + n_r)):
                             idx = cls_indices[g]
                             emb = hs_b[idx]
-
-                            if CONFIG.DEBUG:
-                                check_nan(emb, f'cls_emb_b{b}_g{g}', 'BaseModel.forward CLS extraction')
 
                             sample_embs.append(emb)
 
@@ -264,7 +256,6 @@ class LinearEmbedder(nn.Module):
         super(LinearEmbedder, self).__init__()
         embedding_size = CONFIG.MODEL.CONV_EMBEDDER_MODEL.EMBEDDING_SIZE
         self.fc = nn.Linear(in_channels, embedding_size)
-        self.l2_normalize = CONFIG.MODEL.CONV_EMBEDDER_MODEL.L2_NORMALIZE
 
     def forward(self, x, num_frames):
         # Ensure input dtype matches model weights
@@ -274,8 +265,6 @@ class LinearEmbedder(nn.Module):
 
         # x: (Total_Frames, C)
         x = self.fc(x)
-        if self.l2_normalize:
-            x = F.normalize(x, p=2, dim=-1)
 
         return x
 

@@ -15,7 +15,7 @@ from transformers import AutoProcessor
 from algorithms import get_algo
 from config import CONFIG
 from datasets import create_dataset
-from utils import restore_ckpt, setup_train_dir, save_checkpoint, to_dict, log_and_save_high_loss_samples, check_nan, register_debug_hooks
+from utils import restore_ckpt, setup_train_dir, save_checkpoint, to_dict, log_and_save_high_loss_samples
 
 flags.DEFINE_string('logdir', '/tmp/alignment_logs', 'Path to logs.')
 flags.DEFINE_string('resume_dir', None, 'Path to checkpoint directory to resume from. If None, starts from scratch.')
@@ -24,15 +24,11 @@ flags.DEFINE_string('pretrain_weights', None,
     'model. Loaded with strict=False. '
     'For ZeRO-3 sharded checkpoints consolidate first with: '
     'python zero_to_fp32.py <ckpt_dir> pytorch_model.bin')
-flags.DEFINE_boolean('debug', False, 'Plots detailed summaries on Tensorboard.')
 flags.DEFINE_boolean(
     'force_train', False, 'Continue with training even when '
     'train_logs exist. Useful if one has to resume training. '
     'By default switched off to prevent overwriting existing '
     'experiments.')
-flags.DEFINE_boolean('visualize', False, 'Visualize images, gradients etc. '
-                     'Switched off by for default to speed training up and '
-                     'takes less memory.')
 flags.DEFINE_string('network', 'Qwen3-VL-2B', 'Base network to use (must contain "Qwen3-VL").')
 flags.DEFINE_string('video_paths', None, 'Comma-separated list of paths to video_paths.json.')
 flags.DEFINE_integer('local_rank', -1, 'Local rank for distributed training')
@@ -66,13 +62,6 @@ def train(argv):
 
   if FLAGS.network:
       CONFIG.MODEL.BASE_MODEL.NETWORK = FLAGS.network
-  
-  if FLAGS.debug:
-      CONFIG.DEBUG = True
-      
-  if CONFIG.DEBUG:
-      print("DEBUG MODE: check_nan enabled. torch.autograd.set_detect_anomaly(True)")
-      torch.autograd.set_detect_anomaly(True)
 
   # DeepSpeed Setup
   deepspeed.init_distributed()
@@ -182,11 +171,6 @@ def train(argv):
       config=ds_config
   )
   
-  if CONFIG.DEBUG:
-      # Register hooks on the underlying torch model, not the DeepSpeed engine wrapper
-      # model_engine.module is the 'algo' (Alignment) object
-      register_debug_hooks(model_engine.module)
-
   # Restore checkpoint
   load_path = None
   if FLAGS.resume_dir:
@@ -290,7 +274,7 @@ def train(argv):
       steps = data['chosen_steps']
       seq_lens = data['seq_lens']
       
-      # Data preparation (logic copied from Algorithm.train_one_iter)
+      # Data preparation
       for k, v in data.items():
           if isinstance(v, torch.Tensor):
               data[k] = v.to(device)
@@ -305,43 +289,21 @@ def train(argv):
       
       steps = steps.to(device)
       seq_lens = seq_lens.to(device)
-      
-      if CONFIG.DEBUG:
-          check_nan(steps, 'steps', f'step {current_step}')
-          # Check attention masks if available
-          if 'attention_masks' in data:
-              check_nan(data['attention_masks'], 'attention_masks', f'step {current_step}')
-      
+
       # Forward pass
       embs = model_engine(data, steps, seq_lens, training=True)
-      
-      if CONFIG.DEBUG:
-          check_nan(embs, 'embeddings_output', f'model_engine forward step {current_step}')
 
       # Compute loss
       loss, loss_dict = model_engine.module.compute_loss(embs, steps, seq_lens, current_step,
                                         training=True, frame_labels=data.get('frame_labels'),
                                         seq_labels=data.get('seq_labels'),
                                         metadata=data)
-      
-      if CONFIG.DEBUG:
-          check_nan(loss, 'total_loss', f'step {current_step}')
-          if loss_dict:
-              for k, v in loss_dict.items():
-                  if isinstance(v, torch.Tensor):
-                      check_nan(v, f'loss_dict[{k}]', f'step {current_step}')
 
       # --- Per-Dataset Loss & High Loss Debugging ---
       if is_master:
           log_and_save_high_loss_samples(logdir, current_step, loss_dict, data)
 
       model_engine.backward(loss)
-
-      if CONFIG.DEBUG:
-          # Explicitly check gradients for NaNs
-          for name, param in model_engine.module.named_parameters():
-              if param.grad is not None:
-                  check_nan(param.grad, f"grad_{name}", f"step {current_step} backward")
 
       model_engine.step()
       if model_engine.is_gradient_accumulation_boundary():
@@ -355,13 +317,6 @@ def train(argv):
           pbar.set_description(f"Step {current_step}/{max_iters}")
           
           postfix = {'loss': loss.item(), 'lr': model_engine.get_lr()[0]}
-          if loss_dict:
-              if 'causal_loss' in loss_dict:
-                  causal_val = loss_dict['causal_loss']
-                  postfix['causal'] = causal_val.item() if isinstance(causal_val, torch.Tensor) else causal_val
-              if 'dtw_guidance_loss' in loss_dict:
-                  dtw_val = loss_dict['dtw_guidance_loss']
-                  postfix['dtw'] = dtw_val.item() if isinstance(dtw_val, torch.Tensor) else dtw_val
           pbar.set_postfix(postfix)
       
       if is_master and current_step % CONFIG.LOGGING.REPORT_INTERVAL == 0:

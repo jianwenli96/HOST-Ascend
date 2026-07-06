@@ -15,7 +15,7 @@ from transformers import AutoProcessor
 from algorithms import get_algo
 from config import CONFIG, apply_eval_overrides
 from datasets import create_dataset
-from utils import log_and_save_high_loss_samples, check_nan
+from utils import log_and_save_high_loss_samples
 
 flags.DEFINE_string('logdir', None, 'Path to save evaluation results.')
 flags.DEFINE_string('resume_dir', None, 'Path to checkpoint directory to load model from.')

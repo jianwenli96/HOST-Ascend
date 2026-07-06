@@ -12,8 +12,6 @@ CONFIG = edict()
 
 # Directory for the experiment logs.
 CONFIG.LOGDIR = '/tmp/alignment_logs/'
-# Debug mode
-CONFIG.DEBUG = False
 # Algorithm used for training (alignment is called tcc in paper).
 CONFIG.TRAINING_ALGO = 'alignment'
 # Size of images/frames.
@@ -30,8 +28,6 @@ CONFIG.TRAIN.NUM_FRAMES = 24
 CONFIG.TRAIN.NUM_ALIGN_FRAMES = 24
 CONFIG.TRAIN.MAX_BATCH_FRAMES = 96
 CONFIG.TRAIN.CHUNK_PROBS = [0.1, 0.2, 0.7] # 1x, 2x, 4x multipliers
-CONFIG.TRAIN.VISUALIZE_INTERVAL = 20
-CONFIG.TRAIN.USE_PRETRAINED = True 
 
 # ******************************************************************************
 # Eval params
@@ -68,34 +64,24 @@ CONFIG.MODEL.BASE_MODEL.NETWORK = 'Qwen3-VL-2B'
 # Embedder params (LinearEmbedder, applied on top of the Qwen backbone).
 CONFIG.MODEL.CONV_EMBEDDER_MODEL = edict()
 CONFIG.MODEL.CONV_EMBEDDER_MODEL.EMBEDDING_SIZE = 128
-CONFIG.MODEL.CONV_EMBEDDER_MODEL.L2_NORMALIZE = False
 
 # ******************************************************************************
 # Alignment params
 # ******************************************************************************
 CONFIG.ALIGNMENT = edict()
-CONFIG.ALIGNMENT.CYCLE_LENGTH = 2
-CONFIG.ALIGNMENT.LABEL_SMOOTHING = 0.1
 CONFIG.ALIGNMENT.SOFTMAX_TEMPERATURE = 0.1 # 0.1 for non-normalization
-CONFIG.ALIGNMENT.LOSS_TYPE = 'regression_mse_var'
 CONFIG.ALIGNMENT.NORMALIZE_INDICES = True
 CONFIG.ALIGNMENT.VARIANCE_LAMBDA = 0.001
-# Hinge on |pred_time - true_time| for regression_mse_var main term only. Same units as steps/time
+# Hinge on |pred_time - true_time| for the regression main term only. Same units as steps/time
 # after NORMALIZE_INDICES (if True, use margin in ~[0,1], e.g. 0.03). If NORMALIZE_INDICES=False,
 # use a margin in raw frame-index units or set 0.0 for legacy squared error.
 CONFIG.ALIGNMENT.TCC_REGRESSION_MARGIN = 0
 CONFIG.ALIGNMENT.FORWARD_VARIANCE_LAMBDA = 0.001
-CONFIG.ALIGNMENT.FRACTION = 1.0
-CONFIG.ALIGNMENT.HUBER_DELTA = 0.1
 CONFIG.ALIGNMENT.SIMILARITY_TYPE = 'l2'  # l2, cosine
 CONFIG.ALIGNMENT.NORMALIZE_EMBEDDINGS = True
-CONFIG.ALIGNMENT.STOCHASTIC_MATCHING = False
-CONFIG.ALIGNMENT.CAUSAL_LAMBDA = 0
-CONFIG.ALIGNMENT.CAUSAL_MARGIN = 0
 # DTW alignment settings
 CONFIG.ALIGNMENT.USE_DTW = True
 CONFIG.ALIGNMENT.DTW_WINDOW = None
-CONFIG.ALIGNMENT.DTW_GUIDANCE_LAMBDA = 0 # 15
 CONFIG.ALIGNMENT.DTW_ALIGNMENT_STRATEGY = "middle"
 # SmoothDTW-based matching probability (replaces plain F.softmax for beta)
 # Set USE_SMOOTH_DTW=True to enable; keep False to use original softmax.
@@ -123,12 +109,6 @@ CONFIG.ALIGNMENT.D2TW_NORMALIZE_LENGTH_SUM = True
 # Hinge on normalized path cost: mean(ReLU(cost - m)) per direction (linear, like original D2TW cost).
 # Same units as post-normalization cost. 0 = no hinge (full cost as before).
 CONFIG.ALIGNMENT.D2TW_COST_MARGIN = 0
-# Persist scaled pre-softmax similarity sim_12 (Main->Ref / Ref->Main) for debugging.
-# Only global rank 0 writes; filenames include step + timestamp. See deterministic_alignment._maybe_save_raw_sim12.
-CONFIG.ALIGNMENT.SAVE_RAW_SIM12 = False
-CONFIG.ALIGNMENT.SAVE_RAW_SIM12_DIR = ""  # e.g. under run log dir: "saved_sim12"
-CONFIG.ALIGNMENT.SAVE_RAW_SIM12_EVERY = 1000  # save when global_step % EVERY == 0; use 1 for every step
-CONFIG.ALIGNMENT.SAVE_RAW_SIM12_MAX_BATCH = None  # None = full batch; int = first N samples only
 # ******************************************************************************
 # Special Token IDs for Qwen3-VL
 # ******************************************************************************
@@ -141,8 +121,6 @@ CONFIG.SPECIAL_TOKENS.ALIGN_END_TOKEN_ID = 151662  # <|fim_pad|> - 用于标记 
 # ******************************************************************************
 CONFIG.DATA = edict()
 CONFIG.DATA.RANDOM_OFFSET = 1
-CONFIG.DATA.STRIDE = 16
-CONFIG.DATA.SAMPLING_STRATEGY = 'offset_uniform'  # offset_uniform, stride
 CONFIG.DATA.NUM_STEPS = 3  # number of frames that will be embedded jointly,
 # Multi-view interleaving: datasets listed here split each NUM_STEPS chunk evenly
 # across NUM_VIEWS camera views using path-string substitution (no extra file I/O).

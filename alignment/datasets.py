@@ -1262,24 +1262,19 @@ class AlignmentDataset(Dataset):
     def _sample_steps(self, seq_len, num_steps):
         """Sample frames based on strategy.
 
-        In eval mode the strategy is always overridden to 'uniform' so that
-        frame selection is fully deterministic and reproducible.
+        In eval mode sampling is always deterministic ('uniform', evenly spaced);
+        in train mode it uses a random offset window ('offset_uniform').
         """
-        stride = CONFIG.DATA.STRIDE
-        sampling_strategy = CONFIG.DATA.SAMPLING_STRATEGY
-
-        # Force deterministic uniform sampling in eval
         if self.mode == 'eval':
-            sampling_strategy = 'uniform'
+            # Deterministic: pick num_steps frames evenly spaced across the sequence
+            if seq_len <= num_steps:
+                steps = np.arange(0, seq_len)
+                if len(steps) < num_steps:
+                    steps = np.pad(steps, (0, num_steps - len(steps)), 'edge')
+            else:
+                steps = np.linspace(0, seq_len - 1, num_steps, dtype=int)
 
-        if sampling_strategy == 'stride':
-            max_offset = max(1, seq_len - stride * num_steps)
-            offset = random.randint(0, max_offset - 1)
-            steps = np.arange(offset, offset + num_steps * stride + 1, stride)
-            steps = steps[:num_steps]
-            steps = np.minimum(seq_len - 1, steps)
-
-        elif sampling_strategy == 'offset_uniform':
+        else:
             random_offset = int(CONFIG.DATA.RANDOM_OFFSET)
             if seq_len < random_offset:
                 # Fallback if video is too short
@@ -1302,18 +1297,6 @@ class AlignmentDataset(Dataset):
                     steps = np.arange(0, min(seq_len, num_steps))
                     if len(steps) < num_steps:
                         steps = np.pad(steps, (0, num_steps - len(steps)), 'edge')
-
-        elif sampling_strategy == 'uniform':
-            # Deterministic: pick num_steps frames evenly spaced across the sequence
-            if seq_len <= num_steps:
-                steps = np.arange(0, seq_len)
-                if len(steps) < num_steps:
-                    steps = np.pad(steps, (0, num_steps - len(steps)), 'edge')
-            else:
-                steps = np.linspace(0, seq_len - 1, num_steps, dtype=int)
-
-        else:
-            raise ValueError(f"Unknown sampling strategy: {sampling_strategy}")
 
         return steps
 
