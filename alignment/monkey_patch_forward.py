@@ -385,21 +385,14 @@ def qwen3_vl_mixed_modality_forward(
             bsz, seq_len = input_ids.shape
             min_dtype = torch.finfo(inputs_embeds.dtype).min
 
-            if CONFIG.DATA.CHUNK_INTRA_ATTENTION == 'full':
-                # Full intra-group attention: start with all-zero mask so every token
-                # can attend to every other token.  _apply_group_attention_mask will
-                # still block cross-chunk backward attention (group k cannot see group
-                # k-1 and earlier).  The prefix (align video / instruction) is also
-                # full attention under this mode.
-                mask = torch.zeros(
-                    bsz, 1, seq_len, seq_len,
-                    device=inputs_embeds.device, dtype=inputs_embeds.dtype)
-            else:
-                # Causal (default): standard lower-triangular mask.
-                mask = torch.full((seq_len, seq_len), min_dtype,
-                                  device=inputs_embeds.device, dtype=inputs_embeds.dtype)
-                mask.triu_(diagonal=1)
-                mask = mask.view(1, 1, seq_len, seq_len).expand(bsz, 1, seq_len, seq_len).clone()
+            # Full intra-group attention: start with all-zero mask so every token
+            # can attend to every other token.  _apply_group_attention_mask will
+            # still block cross-chunk backward attention (group k cannot see group
+            # k-1 and earlier).  The prefix (align video / instruction) is also
+            # full attention under this mode.
+            mask = torch.zeros(
+                bsz, 1, seq_len, seq_len,
+                device=inputs_embeds.device, dtype=inputs_embeds.dtype)
 
             padding_mask = attention_mask.to(torch.bool)
             mask.masked_fill_(~padding_mask[:, None, None, :], min_dtype)

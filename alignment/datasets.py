@@ -64,29 +64,7 @@ datasets_with_lower_frequency = [
 # From 15Hz to 30 Hz control frequency
 # 高频控制数据集 (通常 >= 15Hz)
 datasets_with_higher_frequency = [
-    'utaustin_mutex', 
-    'droid', 
-    'droid_fast', 
-    'viola', 
-    'toto',       # TOTO 原生通常是 30Hz
-    'taco_play',  # Taco Play 通常是较高频率 (Rosbag),
-    'Egodex',
-    'robocoin',
     '10042',
-    '10042_part_1',
-    '10042_part_2',
-    '10042_part_3',
-    '10042_part_4',
-    '10058',
-    '10058_part_1',
-    '10058_part_2',
-    '10058_part_3',
-    '10058_part_4',
-    '10053',
-    '10053_part_1',
-    '10053_part_2',
-    '10053_part_3',
-    '10053_part_4',
     
 ]
 
@@ -106,34 +84,23 @@ class AlignmentCollator:
         # Standard Visual Augmentation
         # Configurable Parameters
         self.do_color_jitter = CONFIG.AUGMENTATION.get('BRIGHTNESS', True) or \
-                               CONFIG.AUGMENTATION.get('CONTRAST', True) or \
-                               CONFIG.AUGMENTATION.get('SATURATION', False) or \
-                               CONFIG.AUGMENTATION.get('HUE', False)
-        
+                               CONFIG.AUGMENTATION.get('CONTRAST', True)
+
         self.color_jitter = transforms.ColorJitter(
-            brightness=CONFIG.AUGMENTATION.get('BRIGHTNESS_MAX_DELTA', 32.0 / 255) if CONFIG.AUGMENTATION.get('BRIGHTNESS', True) else 0, 
+            brightness=CONFIG.AUGMENTATION.get('BRIGHTNESS_MAX_DELTA', 32.0 / 255) if CONFIG.AUGMENTATION.get('BRIGHTNESS', True) else 0,
             contrast=(CONFIG.AUGMENTATION.get('CONTRAST_LOWER', 0.5), CONFIG.AUGMENTATION.get('CONTRAST_UPPER', 1.5)) if CONFIG.AUGMENTATION.get('CONTRAST', True) else 0,
-            saturation=(CONFIG.AUGMENTATION.get('SATURATION_LOWER', 0.5), CONFIG.AUGMENTATION.get('SATURATION_UPPER', 1.5)) if CONFIG.AUGMENTATION.get('SATURATION', True) else 0, 
-            hue=CONFIG.AUGMENTATION.get('HUE_MAX_DELTA', 0.2) if CONFIG.AUGMENTATION.get('HUE', True) else 0
         )
         self.do_random_flip = CONFIG.AUGMENTATION.RANDOM_FLIP
-        
-        # Random Crop Parameters
-        self.do_random_crop = CONFIG.AUGMENTATION.RANDOM_CROP
-        self.crop_min_scale = CONFIG.AUGMENTATION.get('CROP_MIN_SCALE', 0.8)
-        self.crop_max_scale = CONFIG.AUGMENTATION.get('CROP_MAX_SCALE', 1.0)
-        self.crop_ratio = (3.0/4.0, 4.0/3.0) 
 
         # Disable augmentation in non-train mode
         if self.mode != 'train':
             self.do_color_jitter = False
             self.do_random_flip = False
-            self.do_random_crop = False
 
         # Shared index for cache-aware image loading (injected by evaluate_v2.py)
         self._ref_cache_index = None
 
-    def augment_sequence(self, images, jitter_transform, random_flip, random_crop):
+    def augment_sequence(self, images, jitter_transform, random_flip):
         """
         Applies consistent geometric and independent photometric augmentation to a sequence of images.
         """
@@ -141,65 +108,47 @@ class AlignmentCollator:
         do_flip = False
         if random_flip and random.random() < 0.5:
             do_flip = True
-            
-        crop_params = None
-        if random_crop and len(images) > 0:
-            img0 = images[0]
-            crop_params = transforms.RandomResizedCrop.get_params(
-                img0, scale=(self.crop_min_scale, self.crop_max_scale), ratio=self.crop_ratio
-            )
-            
+
         jitter_params_list = []
-        
+
         for img in images:
             # Geometric: Consistent
             if do_flip:
                 img = TF.hflip(img)
-            
-            if crop_params is not None:
-                i, j, h, w = crop_params
-                img = TF.resized_crop(img, i, j, h, w, size=img.size)
-            
+
             # Photometric: Independent (Manual to capture params)
             img_jitter_params = None
             if jitter_transform is not None:
                 fn_idx, brightness_factor, contrast_factor, saturation_factor, hue_factor = \
                     transforms.ColorJitter.get_params(
-                        jitter_transform.brightness, 
-                        jitter_transform.contrast, 
-                        jitter_transform.saturation, 
+                        jitter_transform.brightness,
+                        jitter_transform.contrast,
+                        jitter_transform.saturation,
                         jitter_transform.hue
                     )
-                
+
                 # Apply params
                 for fn_id in fn_idx:
                     if fn_id == 0 and brightness_factor is not None:
                         img = TF.adjust_brightness(img, brightness_factor)
                     elif fn_id == 1 and contrast_factor is not None:
                         img = TF.adjust_contrast(img, contrast_factor)
-                    elif fn_id == 2 and saturation_factor is not None:
-                        img = TF.adjust_saturation(img, saturation_factor)
-                    elif fn_id == 3 and hue_factor is not None:
-                        img = TF.adjust_hue(img, hue_factor)
-                
+
                 # Capture params
                 img_jitter_params = {
                     'fn_idx': fn_idx.tolist() if hasattr(fn_idx, 'tolist') else fn_idx,
                     'b': float(brightness_factor) if brightness_factor is not None else None,
                     'c': float(contrast_factor) if contrast_factor is not None else None,
-                    's': float(saturation_factor) if saturation_factor is not None else None,
-                    'h': float(hue_factor) if hue_factor is not None else None
                 }
-            
+
             jitter_params_list.append(img_jitter_params)
             augmented.append(img)
-            
+
         params = {
             'flip': do_flip,
-            'crop': crop_params,
             'jitter': jitter_params_list
         }
-            
+
         return augmented, params
 
     def load_imgs(self, paths):
@@ -579,14 +528,14 @@ class AlignmentCollator:
 
             if do_augment:
                 jitter = self.color_jitter if self.do_color_jitter else None
-                main_all, params_main = self.augment_sequence(main_all, jitter, self.do_random_flip, self.do_random_crop)
+                main_all, params_main = self.augment_sequence(main_all, jitter, self.do_random_flip)
                 if ref_all:
-                    ref_all, params_ref = self.augment_sequence(ref_all, jitter, self.do_random_flip, self.do_random_crop)
+                    ref_all, params_ref = self.augment_sequence(ref_all, jitter, self.do_random_flip)
                 else:
-                    params_ref = {'flip': False, 'crop': None, 'jitter': []}
+                    params_ref = {'flip': False, 'jitter': []}
             else:
-                params_main = {'flip': False, 'crop': None, 'jitter': [None] * len(main_all)}
-                params_ref  = {'flip': False, 'crop': None, 'jitter': [None] * len(ref_all)}
+                params_main = {'flip': False, 'jitter': [None] * len(main_all)}
+                params_ref  = {'flip': False, 'jitter': [None] * len(ref_all)}
 
             a_len = len(align)
             main_align = main_all[:a_len];  main_flat = main_all[a_len:]
@@ -2012,26 +1961,15 @@ def get_transforms(mode='train'):
         # Augmentation
         if CONFIG.AUGMENTATION.RANDOM_FLIP:
             transforms_list.append(transforms.RandomHorizontalFlip(p=0.5))
-            
-        if CONFIG.AUGMENTATION.RANDOM_CROP:
-            # TF used RandomCrop with min_scale 0.8. 
-            # RandomResizedCrop is similar but also resizes back.
-            # Or RandomCrop then Resize?
-            # Let's use RandomResizedCrop for simplicity and robustness
-            transforms_list.append(transforms.RandomResizedCrop(CONFIG.IMAGE_SIZE, scale=(0.8, 1.0)))
-        
+
         # Color Jitter
         brightness = CONFIG.AUGMENTATION.BRIGHTNESS_MAX_DELTA if CONFIG.AUGMENTATION.BRIGHTNESS else 0
         contrast = 0.5 if CONFIG.AUGMENTATION.CONTRAST else 0 # TF used lower=0.5, upper=1.5 -> factor ~0.5
-        hue = CONFIG.AUGMENTATION.HUE_MAX_DELTA if CONFIG.AUGMENTATION.HUE else 0
-        saturation = 0.5 if CONFIG.AUGMENTATION.SATURATION else 0
-        
-        if brightness > 0 or contrast > 0 or hue > 0 or saturation > 0:
+
+        if brightness > 0 or contrast > 0:
             transforms_list.append(transforms.ColorJitter(
-                brightness=brightness, 
-                contrast=contrast, 
-                saturation=saturation, 
-                hue=hue
+                brightness=brightness,
+                contrast=contrast,
             ))
             
     # ToTensor (Converts to [0, 1])

@@ -12,7 +12,7 @@ from absl import logging
 from tqdm import tqdm
 from transformers import AutoProcessor
 
-from algorithms import get_algo
+from algos.alignment import Alignment
 from config import CONFIG
 from datasets import create_dataset
 from utils import restore_ckpt, setup_train_dir, save_checkpoint, to_dict, log_and_save_high_loss_samples
@@ -37,10 +37,6 @@ flags.DEFINE_string('ds_config', 'scripts/ds_config.json', 'Path to DeepSpeed co
 flags.DEFINE_integer('save_interval', None, 'Number of steps between saving checkpoints.')
 flags.DEFINE_integer('max_iters', None, 'Total number of training steps.')
 flags.DEFINE_integer('num_align_frames', None, 'Number of frames to use for alignment.')
-flags.DEFINE_boolean('use_d2tw_loss', False,
-    'Enable soft-DTW path-cost loss (D2TW). '
-    'Requires USE_SMOOTH_DTW=True in config. '
-    'Adds sdtw[-1,-1] (cumulative alignment path cost) weighted by D2TW_LOSS_LAMBDA.')
 
 FLAGS = flags.FLAGS
 
@@ -56,9 +52,6 @@ def train(argv):
 
   if FLAGS.num_align_frames is not None:
       CONFIG.TRAIN.NUM_ALIGN_FRAMES = FLAGS.num_align_frames
-
-  if FLAGS.use_d2tw_loss:
-      CONFIG.ALIGNMENT.USE_D2TW_LOSS = True
 
   if FLAGS.network:
       CONFIG.MODEL.BASE_MODEL.NETWORK = FLAGS.network
@@ -89,7 +82,7 @@ def train(argv):
   if is_master:
       logging.info('Using device: %s', device)
 
-  algo = get_algo(CONFIG.TRAINING_ALGO)
+  algo = Alignment()
   # algo.to(device) # DeepSpeed will handle this
 
   # Warm-start from a single pytorch state-dict file (strict=False).

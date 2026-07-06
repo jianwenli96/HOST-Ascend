@@ -42,39 +42,24 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _soft_min_vec(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor,
-                  gamma_s: float, softning: str) -> torch.Tensor:
+                  gamma_s: float) -> torch.Tensor:
     """Vectorised soft-min over three same-shape tensors.
 
     Args:
         a, b, c  : [...] float32 tensors (any broadcastable shape)
         gamma_s  : temperature
-        softning : 'dtw_prob' or 'dtw_minGamma'
 
     Returns:
         soft-min result, same shape as inputs.
     """
     neighbors = torch.stack([a, b, c], dim=-1)   # [..., 3]
-    if softning == "dtw_prob":
-        probs = F.softmax(-neighbors / gamma_s, dim=-1)
-        return probs[..., 0] * a + probs[..., 1] * b + probs[..., 2] * c
-    elif softning == "dtw_minGamma":
-        zi     = -neighbors / gamma_s
-        max_zi = zi.max(dim=-1).values
-        return -gamma_s * (
-            max_zi
-            + torch.log(torch.exp(zi - max_zi.unsqueeze(-1)).sum(dim=-1))
-        )
-    else:
-        raise ValueError(
-            f"smooth_dtw_probs: unsupported softning='{softning}'. "
-            "Choose 'dtw_prob' or 'dtw_minGamma'."
-        )
+    probs = F.softmax(-neighbors / gamma_s, dim=-1)
+    return probs[..., 0] * a + probs[..., 1] * b + probs[..., 2] * c
 
 
 def _smooth_dtw_anti_diag(
     cost: torch.Tensor,
     gamma_s: float,
-    softning: str,
     bidirectional: bool,
     return_cost: bool = False,
 ) -> torch.Tensor:
@@ -99,7 +84,6 @@ def _smooth_dtw_anti_diag(
     Args:
         cost         : [B, T, T] float32 per-cell DTW cost
         gamma_s      : soft-min temperature
-        softning     : 'dtw_prob' or 'dtw_minGamma'
         bidirectional: if True, also compute backward pass
 
     Returns:
@@ -173,7 +157,7 @@ def _smooth_dtw_anti_diag(
             up   = prev1
             diag = shift_left(prev2)
 
-        cur = c_k + _soft_min_vec(left, diag, up, gamma_s, softning)
+        cur = c_k + _soft_min_vec(left, diag, up, gamma_s)
         cur = cur.masked_fill(invalid_mask(k), INF)
 
         fwd_list.append(cur)
@@ -212,7 +196,7 @@ def _smooth_dtw_anti_diag(
             down   = shift_left(prev1_b)
             diag_s = prev2_b if k == T - 2 else shift_left(prev2_b)  # ← special at k=T-2
 
-        cur_b = c_k + _soft_min_vec(right, diag_s, down, gamma_s, softning)
+        cur_b = c_k + _soft_min_vec(right, diag_s, down, gamma_s)
         cur_b = cur_b.masked_fill(invalid_mask(k), INF)
 
         bwd_list_rev.append(cur_b)
@@ -239,7 +223,6 @@ def smooth_dtw_probs(
     sim: torch.Tensor,
     gamma_s: float = 0.1,
     gamma_f: float = 0.1,
-    softning: str = "dtw_prob",
     bidirectional: bool = False,
     method: str = "loop",
     return_cost: bool = False,
@@ -253,8 +236,6 @@ def smooth_dtw_probs(
                         final row-wise softmax.  Smaller → harder, more decisive.
         gamma_f       : Column-normalisation temperature (D2TW Eq. 4).
                         Set to 0 to skip column normalisation.
-        softning      : ``'dtw_prob'``     — weighted-sum soft-min (D2TW default).
-                        ``'dtw_minGamma'`` — log-sum-exp soft-min (D3TW variant).
         bidirectional : If False (default), use forward-only table (original).
                         If True, use forward + backward table so that
                         ``argmax(beta[b, i, :])`` converges to the hard DTW
@@ -316,7 +297,7 @@ def smooth_dtw_probs(
                 f"(got T1={T1}, T2={T2}); falling back to method='loop'."
             )
         else:
-            _ad_result = _smooth_dtw_anti_diag(cost, gamma_s, softning, bidirectional, return_cost=return_cost)
+            _ad_result = _smooth_dtw_anti_diag(cost, gamma_s, bidirectional, return_cost=return_cost)
             if return_cost:
                 return _ad_result[0].to(orig_dtype), _ad_result[1]
             return _ad_result.to(orig_dtype)
@@ -332,21 +313,8 @@ def smooth_dtw_probs(
     def _soft_min(a, b, c):
         """Soft-min over three [B] cost tensors → [B]."""
         neighbors = torch.stack([a, b, c], dim=-1)   # [B, 3]
-        if softning == "dtw_prob":
-            probs = F.softmax(-neighbors / gamma_s, dim=-1)
-            return probs[:, 0] * a + probs[:, 1] * b + probs[:, 2] * c
-        elif softning == "dtw_minGamma":
-            zi     = -neighbors / gamma_s
-            max_zi = zi.max(dim=-1).values
-            return -gamma_s * (
-                max_zi
-                + torch.log(torch.exp(zi - max_zi.unsqueeze(-1)).sum(dim=-1))
-            )
-        else:
-            raise ValueError(
-                f"smooth_dtw_probs: unsupported softning='{softning}'. "
-                "Choose 'dtw_prob' or 'dtw_minGamma'."
-            )
+        probs = F.softmax(-neighbors / gamma_s, dim=-1)
+        return probs[:, 0] * a + probs[:, 1] * b + probs[:, 2] * c
 
     # Forward pass -------------------------------------------------------
     row0     = [zero_cell] + [inf_cell] * T2

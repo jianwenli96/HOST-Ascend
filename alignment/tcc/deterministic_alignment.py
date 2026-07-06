@@ -3,7 +3,6 @@
 
 import torch
 import torch.nn.functional as F
-import numpy as np
 from config import CONFIG
 from .losses import regression_loss
 from .smooth_dtw import smooth_dtw_probs
@@ -110,43 +109,37 @@ def align_pair_of_sequences(embs1,
   # Find distances between embs1 and embs2.
   sim_12 = get_scaled_similarity(embs1, embs2, similarity_type, temperature)
 
-  # Compute beta: matching probability for each source frame over target frames.
-  # USE_SMOOTH_DTW=True: derive from soft-DTW cumulative cost (temporal monotonicity bias).
-  # USE_SMOOTH_DTW=False: plain row-wise softmax (original TCC behaviour).
-  _want_cost = CONFIG.ALIGNMENT.USE_SMOOTH_DTW and CONFIG.ALIGNMENT.USE_D2TW_LOSS
+  # Compute beta: matching probability for each source frame over target frames,
+  # derived from soft-DTW cumulative cost (temporal monotonicity bias).
+  _want_cost = CONFIG.ALIGNMENT.USE_D2TW_LOSS
   path_cost_12 = None  # (B,) soft-DTW terminal cost; None when D2TW loss is disabled
-  if CONFIG.ALIGNMENT.USE_SMOOTH_DTW:
-      # smooth_dtw_probs requires [B, T1, T2]; handle the 2D case (single pair).
-      if sim_12.dim() == 2:
-          _result = smooth_dtw_probs(
-              sim_12.unsqueeze(0),
-              gamma_s=CONFIG.ALIGNMENT.SMOOTH_DTW_GAMMA_S,
-              gamma_f=CONFIG.ALIGNMENT.SMOOTH_DTW_GAMMA_F,
-              softning=CONFIG.ALIGNMENT.SMOOTH_DTW_SOFTNING,
-              bidirectional=CONFIG.ALIGNMENT.SMOOTH_DTW_BIDIRECTIONAL,
-              method=CONFIG.ALIGNMENT.SMOOTH_DTW_METHOD,
-              return_cost=_want_cost,
-          )
-          if _want_cost:
-              softmaxed_sim_12, path_cost_12 = _result[0].squeeze(0), _result[1]  # [T1,T2], (1,)
-          else:
-              softmaxed_sim_12 = _result.squeeze(0)   # [T1, T2]
+  # smooth_dtw_probs requires [B, T1, T2]; handle the 2D case (single pair).
+  if sim_12.dim() == 2:
+      _result = smooth_dtw_probs(
+          sim_12.unsqueeze(0),
+          gamma_s=CONFIG.ALIGNMENT.SMOOTH_DTW_GAMMA_S,
+          gamma_f=CONFIG.ALIGNMENT.SMOOTH_DTW_GAMMA_F,
+          bidirectional=CONFIG.ALIGNMENT.SMOOTH_DTW_BIDIRECTIONAL,
+          method=CONFIG.ALIGNMENT.SMOOTH_DTW_METHOD,
+          return_cost=_want_cost,
+      )
+      if _want_cost:
+          softmaxed_sim_12, path_cost_12 = _result[0].squeeze(0), _result[1]  # [T1,T2], (1,)
       else:
-          _result = smooth_dtw_probs(
-              sim_12,
-              gamma_s=CONFIG.ALIGNMENT.SMOOTH_DTW_GAMMA_S,
-              gamma_f=CONFIG.ALIGNMENT.SMOOTH_DTW_GAMMA_F,
-              softning=CONFIG.ALIGNMENT.SMOOTH_DTW_SOFTNING,
-              bidirectional=CONFIG.ALIGNMENT.SMOOTH_DTW_BIDIRECTIONAL,
-              method=CONFIG.ALIGNMENT.SMOOTH_DTW_METHOD,
-              return_cost=_want_cost,
-          )
-          if _want_cost:
-              softmaxed_sim_12, path_cost_12 = _result[0], _result[1]   # [B,T1,T2], (B,)
-          else:
-              softmaxed_sim_12 = _result                # [B, T1, T2]
+          softmaxed_sim_12 = _result.squeeze(0)   # [T1, T2]
   else:
-      softmaxed_sim_12 = F.softmax(sim_12, dim=-1)
+      _result = smooth_dtw_probs(
+          sim_12,
+          gamma_s=CONFIG.ALIGNMENT.SMOOTH_DTW_GAMMA_S,
+          gamma_f=CONFIG.ALIGNMENT.SMOOTH_DTW_GAMMA_F,
+          bidirectional=CONFIG.ALIGNMENT.SMOOTH_DTW_BIDIRECTIONAL,
+          method=CONFIG.ALIGNMENT.SMOOTH_DTW_METHOD,
+          return_cost=_want_cost,
+      )
+      if _want_cost:
+          softmaxed_sim_12, path_cost_12 = _result[0], _result[1]   # [B,T1,T2], (B,)
+      else:
+          softmaxed_sim_12 = _result                # [B, T1, T2]
 
   forward_var_loss, _, var_mean = _compute_variance_loss(
       softmaxed_sim_12, steps2, seq_lens2, normalize_indices, forward_variance_lambda)
@@ -175,89 +168,8 @@ def align_pair_of_sequences(embs1,
       batch_size = embs1.size(0)
       labels = torch.eye(max_num_steps, device=embs1.device).unsqueeze(0).repeat(batch_size, 1, 1)
 
-  # Also return forward logits (sim_12) for debugging/visualization/DTW
   # path_cost_12: (B,) soft-DTW terminal cost, or None when USE_D2TW_LOSS=False
-  return logits, labels, softmaxed_sim_12, forward_var_loss, stats, sim_12, path_cost_12
-
-
-def extract_alignment_indices_from_sim_matrix_dtw(sim_matrix, temperature, window=None, alignment_strategy="middle"):
-  """
-  Extract DTW alignment indices from a similarity matrix. No direction handling:
-  matrix rows = source positions, columns = target positions.
-  Returns (B, T1) with alignment_indices[b, i] = target column index j.
-
-  Args:
-      sim_matrix: torch.Tensor, shape (B, T1, T2) — similarity matrix (pre-softmax)
-      temperature: float — scale used when converting sim to distance
-      window: int or None — DTW band window
-      alignment_strategy: str — "first", "middle", or "last" when multiple j map to same i
-
-  Returns:
-      alignment_indices: torch.Tensor, shape (B, T1), dtype long
-  """
-  batch_size, T1, T2 = sim_matrix.shape
-  device = sim_matrix.device
-
-  # sim = - (dist^2) / temp  =>  dist = sqrt(max(-sim * temp, 0))
-  dist_matrices = torch.sqrt(torch.clamp(-sim_matrix * temperature, min=0.0)).detach().cpu().float().numpy().astype(np.double)
-  alignment_indices = torch.zeros(batch_size, T1, dtype=torch.long, device=device)
-
-  for b in range(batch_size):
-      dist_matrix = dist_matrices[b].copy()
-      r, c = T1, T2
-      accumulated_cost = np.full((r + 1, c + 1), np.inf)
-      accumulated_cost[0, 0] = 0
-
-      for i in range(r):
-          j_start = max(0, i - window) if window is not None else 0
-          j_end = min(c, i + window + 1) if window is not None else c
-          for j in range(j_start, j_end):
-              cost = dist_matrix[i, j]
-              accumulated_cost[i + 1, j + 1] = cost + min(
-                  accumulated_cost[i, j + 1],
-                  accumulated_cost[i + 1, j],
-                  accumulated_cost[i, j],
-              )
-
-      path = []
-      i, j = r - 1, c - 1
-      while i >= 0 and j >= 0:
-          path.append((i, j))
-          if i == 0 and j == 0:
-              break
-          choices = [
-              accumulated_cost[i, j],
-              accumulated_cost[i, j + 1],
-              accumulated_cost[i + 1, j],
-          ]
-          best = np.argmin(choices)
-          if best == 0:
-              i, j = i - 1, j - 1
-          elif best == 1:
-              i -= 1
-          else:
-              j -= 1
-      path.reverse()
-
-      if alignment_strategy == "last":
-          path_dict = {i: j for (i, j) in path}
-      elif alignment_strategy == "middle":
-          from collections import defaultdict
-          path_multidict = defaultdict(list)
-          for (i, j) in path:
-              path_multidict[i].append(j)
-          path_dict = {i: j_list[len(j_list) // 2] for i, j_list in path_multidict.items()}
-      else:
-          path_dict = {}
-          for (i, j) in path:
-              if i not in path_dict:
-                  path_dict[i] = j
-
-      for i in range(T1):
-          j = path_dict.get(i, 0)
-          alignment_indices[b, i] = j
-
-  return alignment_indices
+  return logits, labels, softmaxed_sim_12, forward_var_loss, stats, path_cost_12
 
 
 def compute_deterministic_alignment_loss_paired(embs_main,
@@ -281,52 +193,29 @@ def compute_deterministic_alignment_loss_paired(embs_main,
       embs_ref = F.normalize(embs_ref, p=2, dim=-1)
 
   # --- 1. Main -> Ref -> Main (Backward Cycle) ---
-  logits_mr, labels_mr, sim_mr, var_loss_mr, stats_mr, raw_sim_mr, path_cost_mr = align_pair_of_sequences(
+  logits_mr, labels_mr, sim_mr, var_loss_mr, stats_mr, path_cost_mr = align_pair_of_sequences(
       embs_main, embs_ref, similarity_type, temperature,
       steps2=steps_ref, seq_lens2=seq_lens_ref,
       normalize_indices=normalize_indices,
       forward_variance_lambda=forward_variance_lambda)
 
   # --- 2. Ref -> Main -> Ref (Forward Cycle) ---
-  logits_rm, labels_rm, sim_rm, var_loss_rm, stats_rm, raw_sim_rm, path_cost_rm = align_pair_of_sequences(
+  logits_rm, labels_rm, sim_rm, var_loss_rm, stats_rm, path_cost_rm = align_pair_of_sequences(
       embs_ref, embs_main, similarity_type, temperature,
       steps2=steps_main, seq_lens2=seq_lens_main,
       normalize_indices=normalize_indices,
       forward_variance_lambda=forward_variance_lambda)
 
   # --- DTW Indices Extraction (Compute ONCE and reuse for loss/logging) ---
-  # Always compute DTW indices for logging, regardless of config
-  dtw_sim_mr_input = raw_sim_mr
-  dtw_sim_rm_input = raw_sim_rm
-
+  # Always compute DTW indices for logging, regardless of config.
+  # Reuse already-computed student beta matrices: argmax(beta[b, i, :]) gives ~90%
+  # agreement with hard DTW at any gamma_s. The remaining 10% is at genuinely
+  # ambiguous path positions (gap ≈ 0) where both choices are valid DTW paths; no
+  # meaningful regression signal is lost.
   d2tw_loss = None  # initialised here; set below when USE_D2TW_LOSS=True
 
-  _use_smooth_as_indices = (
-      CONFIG.ALIGNMENT.SMOOTH_DTW_AS_DTW_INDICES
-      and CONFIG.ALIGNMENT.USE_SMOOTH_DTW
-  )
-
-  if _use_smooth_as_indices:
-      # Fast path: reuse already-computed student beta matrices.
-      # argmax(beta[b, i, :]) gives ~90% agreement with hard DTW at any gamma_s.
-      # The remaining 10% is at genuinely ambiguous path positions (gap ≈ 0) where
-      # both choices are valid DTW paths; no meaningful regression signal is lost.
-      dtw_indices_mr = sim_mr.detach().argmax(dim=-1)                  # [B, T_main]
-      dtw_indices_rm = sim_rm.detach().argmax(dim=-1)                      # [B, T_ref]
-  else:
-      dtw_indices_mr = extract_alignment_indices_from_sim_matrix_dtw(
-          dtw_sim_mr_input,
-          temperature,
-          window=CONFIG.ALIGNMENT.DTW_WINDOW,
-          alignment_strategy=CONFIG.ALIGNMENT.DTW_ALIGNMENT_STRATEGY,
-      ).detach()  # CRITICAL: detach to avoid gradient backprop
-
-      dtw_indices_rm = extract_alignment_indices_from_sim_matrix_dtw(
-          dtw_sim_rm_input,
-          temperature,
-          window=CONFIG.ALIGNMENT.DTW_WINDOW,
-          alignment_strategy=CONFIG.ALIGNMENT.DTW_ALIGNMENT_STRATEGY,
-      ).detach()
+  dtw_indices_mr = sim_mr.detach().argmax(dim=-1)                  # [B, T_main]
+  dtw_indices_rm = sim_rm.detach().argmax(dim=-1)                      # [B, T_ref]
 
   # Note: dtw_indices_mr and dtw_indices_rm are in the range of real frames (0-indexed)
 
@@ -374,31 +263,20 @@ def compute_deterministic_alignment_loss_paired(embs_main,
   # sdtw[-1,-1] is the cumulative cost of the optimal alignment path; minimising it encourages
   # globally coherent alignment, complementing the local TCC cycle-consistency objective.
   if CONFIG.ALIGNMENT.USE_D2TW_LOSS:
-      assert CONFIG.ALIGNMENT.USE_SMOOTH_DTW, (
-          "USE_D2TW_LOSS=True requires USE_SMOOTH_DTW=True "
-          "(the path cost is read from the same DP table)"
-      )
       if path_cost_mr is not None and path_cost_rm is not None:
-          if CONFIG.ALIGNMENT.D2TW_NORMALIZE_LENGTH_SUM:
-              # Grid axes match sim_mr / sim_rm: (B, T_src, T_tgt) -> denom = T_src + T_tgt
-              t1_mr, t2_mr = sim_mr.shape[-2], sim_mr.shape[-1]
-              t1_rm, t2_rm = sim_rm.shape[-2], sim_rm.shape[-1]
-              denom_mr = path_cost_mr.new_tensor(float(t1_mr + t2_mr) + 1e-8)
-              denom_rm = path_cost_rm.new_tensor(float(t1_rm + t2_rm) + 1e-8)
-              d2tw_cost_mr = path_cost_mr / denom_mr
-              d2tw_cost_rm = path_cost_rm / denom_rm
-          else:
-              d2tw_cost_mr = path_cost_mr
-              d2tw_cost_rm = path_cost_rm
-          # Optional hinge: linear excess ReLU(cost - m) to stay consistent with original D2TW
-          # (minimize path cost, not squared error on cost).
+          # Grid axes match sim_mr / sim_rm: (B, T_src, T_tgt) -> denom = T_src + T_tgt
+          t1_mr, t2_mr = sim_mr.shape[-2], sim_mr.shape[-1]
+          t1_rm, t2_rm = sim_rm.shape[-2], sim_rm.shape[-1]
+          denom_mr = path_cost_mr.new_tensor(float(t1_mr + t2_mr) + 1e-8)
+          denom_rm = path_cost_rm.new_tensor(float(t1_rm + t2_rm) + 1e-8)
+          d2tw_cost_mr = path_cost_mr / denom_mr
+          d2tw_cost_rm = path_cost_rm / denom_rm
+          # Hinge: linear excess ReLU(cost - m) to stay consistent with original D2TW
+          # (minimize path cost, not squared error on cost). m=0 reduces to the raw cost
+          # since d2tw_cost is always >= 0.
           d2tw_m = float(CONFIG.ALIGNMENT.D2TW_COST_MARGIN)
-          if d2tw_m > 0.0:
-              d2tw_mr_for_loss = F.relu(d2tw_cost_mr - d2tw_m)
-              d2tw_rm_for_loss = F.relu(d2tw_cost_rm - d2tw_m)
-          else:
-              d2tw_mr_for_loss = d2tw_cost_mr
-              d2tw_rm_for_loss = d2tw_cost_rm
+          d2tw_mr_for_loss = F.relu(d2tw_cost_mr - d2tw_m)
+          d2tw_rm_for_loss = F.relu(d2tw_cost_rm - d2tw_m)
           d2tw_loss = (d2tw_mr_for_loss.mean() + d2tw_rm_for_loss.mean()) / 2.0
           loss = loss + d2tw_loss * CONFIG.ALIGNMENT.D2TW_LOSS_LAMBDA
 
@@ -428,13 +306,8 @@ def compute_deterministic_alignment_loss_paired(embs_main,
   forward_dtw_indices = dtw_indices_mr
   backward_dtw_indices = dtw_indices_rm
 
-  # Determine which indices to use as primary based on config
-  if CONFIG.ALIGNMENT.USE_DTW:
-      forward_indices = forward_dtw_indices
-      backward_indices = backward_dtw_indices
-  else:
-      forward_indices = forward_argmax_indices
-      backward_indices = backward_argmax_indices
+  forward_indices = forward_dtw_indices
+  backward_indices = backward_dtw_indices
 
   # Construct Loss Dict
   loss_dict = {

@@ -12,7 +12,7 @@ from absl import logging
 from tqdm import tqdm
 from transformers import AutoProcessor
 
-from algorithms import get_algo
+from algos.alignment import Alignment
 from config import CONFIG, apply_eval_overrides
 from datasets import create_dataset
 from utils import log_and_save_high_loss_samples
@@ -89,7 +89,7 @@ def evaluate(argv):
       print(f"Loading checkpoint from: {FLAGS.resume_dir}")
       print(f"Saving evaluation results to: {logdir}")
 
-  algo = get_algo(CONFIG.TRAINING_ALGO)
+  algo = Alignment()
 
   # Setup DeepSpeed (for loading checkpoint and inference)
   ds_config_path = FLAGS.ds_config
