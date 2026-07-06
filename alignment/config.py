@@ -10,9 +10,8 @@ CONFIG = edict()
 # Experiment params
 # ******************************************************************************
 
-# Directory for the experiment logs.
 CONFIG.LOGDIR = '/tmp/alignment_logs/'
-# Size of images/frames (used by image loading/resize pipeline).
+# Consumed by the image loading/resize pipeline regardless of backbone.
 CONFIG.IMAGE_SIZE = 224
 
 # ******************************************************************************
@@ -20,7 +19,6 @@ CONFIG.IMAGE_SIZE = 224
 # ******************************************************************************
 
 CONFIG.TRAIN = edict()
-# Number of frames to use while training.
 CONFIG.TRAIN.NUM_FRAMES = 24
 CONFIG.TRAIN.NUM_ALIGN_FRAMES = 24
 CONFIG.TRAIN.MAX_BATCH_FRAMES = 96
@@ -30,12 +28,10 @@ CONFIG.TRAIN.CHUNK_PROBS = [0.1, 0.2, 0.7] # 1x, 2x, 4x multipliers
 # Eval params
 # ******************************************************************************
 CONFIG.EVAL = edict()
-# Number of samples in each batch.
 # Set to 1 when using 4x multiplier to ensure all samples are processed
 CONFIG.EVAL.BATCH_SIZE = 1
-# Number of frames to use while evaluating. Only used to see loss in eval mode.
+# Only used to see loss in eval mode.
 CONFIG.EVAL.NUM_FRAMES = 24
-# Chunk probabilities for evaluation [1x, 2x, 4x multipliers]
 CONFIG.EVAL.CHUNK_PROBS = [0.0, 0.0, 1.0]  # Force 4x multiplier (96 frames total)
 
 # Ref embedding cache (eval only)
@@ -101,7 +97,7 @@ CONFIG.DATA.NUM_STEPS = 3  # number of frames that will be embedded jointly,
 # For 3-camera setups, set NUM_STEPS to 6 so NUM_STEPS // num_views stays integral.
 CONFIG.DATA.CAM_MAPPING_DIR = '/open_data/cgy/cam_mapping'
 CONFIG.DATA.USE_CAM_MAPPING = True
-CONFIG.DATA.FRAME_STRIDE = 10  # stride between context frames
+CONFIG.DATA.FRAME_STRIDE = 10
 
 # Dataset weights for sampling. Key: dataset name (from json filename), Value: weight.
 CONFIG.DATA.DATASET_WEIGHTS = {
@@ -129,14 +125,11 @@ CONFIG.DATA.TASK_PATHS_TRANSFORMS = {
 # ******************************************************************************
 CONFIG.AUGMENTATION = edict()
 
-# --- Part 1: Currently Used (in datasets.py) ---
 CONFIG.AUGMENTATION.RANDOM_FLIP = True
 
-# Switches for ColorJitter (PyTorch)
 CONFIG.AUGMENTATION.BRIGHTNESS = True
 CONFIG.AUGMENTATION.CONTRAST = True
 
-# Magnitudes used by ColorJitter
 CONFIG.AUGMENTATION.BRIGHTNESS_MAX_DELTA = 32.0 / 255
 CONFIG.AUGMENTATION.CONTRAST_LOWER = 0.5
 CONFIG.AUGMENTATION.CONTRAST_UPPER = 1.5
@@ -145,26 +138,18 @@ CONFIG.AUGMENTATION.CONTRAST_UPPER = 1.5
 # Logging params
 # ******************************************************************************
 CONFIG.LOGGING = edict()
-# Number of steps between summary logging.
 CONFIG.LOGGING.REPORT_INTERVAL = 10
-# Keys to exclude from WandB logging
 CONFIG.LOGGING.EXCLUDE_KEYS = ['per_sample_loss', 'alignment_indices']
-# Threshold for saving high loss samples
 CONFIG.LOGGING.HIGH_LOSS_THRESHOLD = 0.3
-# Threshold for saving low loss samples
 CONFIG.LOGGING.LOW_LOSS_THRESHOLD = 0.2
-# Max number of low loss samples to save
 CONFIG.LOGGING.MAX_LOW_LOSS_SAMPLES = 30
-# Step to start saving high loss samples
 CONFIG.LOGGING.DEBUG_STEP_START = 0
-# Interval steps to save the full batch of samples
 CONFIG.LOGGING.SAVE_BATCH_INTERVAL = 30
 
 # ******************************************************************************
 # Checkpointing params
 # ******************************************************************************
 CONFIG.CHECKPOINT = edict()
-# Number of steps between consecutive checkpoints.
 CONFIG.CHECKPOINT.SAVE_INTERVAL = 500
 
 # ******************************************************************************
@@ -174,7 +159,6 @@ CONFIG.DS_CONFIG = edict()
 CONFIG.DS_CONFIG.train_micro_batch_size_per_gpu = 4
 CONFIG.DS_CONFIG.gradient_clipping = 3.0
 
-# Optimizer
 CONFIG.DS_CONFIG.optimizer = edict()
 CONFIG.DS_CONFIG.optimizer.type = 'AdamW'
 CONFIG.DS_CONFIG.optimizer.params = edict()
@@ -183,7 +167,6 @@ CONFIG.DS_CONFIG.optimizer.params.betas = [0.9, 0.999]
 CONFIG.DS_CONFIG.optimizer.params.eps = 1e-8
 CONFIG.DS_CONFIG.optimizer.params.weight_decay = 0.00001
 
-# Scheduler
 CONFIG.DS_CONFIG.scheduler = edict()
 CONFIG.DS_CONFIG.scheduler.type = 'WarmupCosineLR'
 CONFIG.DS_CONFIG.scheduler.params = edict()

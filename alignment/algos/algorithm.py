@@ -165,21 +165,18 @@ class Algorithm(nn.Module):
                 mask = (gids == gid)
                 chunk_idx = torch.argsort(cids[mask])
 
-                # Merge Main
                 curr_embs_m = embs_main[mask][chunk_idx]
                 new_embs_main.append(curr_embs_m.reshape(-1, curr_embs_m.size(-1)))
                 curr_steps_m = steps_main[mask][chunk_idx]
                 new_steps_main.append(curr_steps_m.reshape(-1))
                 new_seq_lens_main.append(seq_lens_main[mask][0])
 
-                # Merge Ref
                 curr_embs_r = embs_ref[mask][chunk_idx]
                 new_embs_ref.append(curr_embs_r.reshape(-1, curr_embs_r.size(-1)))
                 curr_steps_r = steps_ref[mask][chunk_idx]
                 new_steps_ref.append(curr_steps_r.reshape(-1))
                 new_seq_lens_ref.append(seq_lens_ref[mask][0])
 
-                # Merge Metadata for logging
                 first_idx = mask.nonzero(as_tuple=True)[0][chunk_idx[0]].item()
                 all_paths_m, all_paths_r = [], []
                 for c_idx in chunk_idx:
@@ -199,7 +196,6 @@ class Algorithm(nn.Module):
                     'chunk_id': "merged"
                 })
 
-            # Final grouped tensors
             embs_main = torch.stack(new_embs_main)
             embs_ref = torch.stack(new_embs_ref)
             steps_main = torch.stack(new_steps_main)

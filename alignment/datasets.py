@@ -37,14 +37,11 @@ def get_stratified_idxs(total_len, target_num, mode='train'):
     if total_len <= target_num or mode == 'eval':
         return np.linspace(0, total_len - 1, target_num, dtype=int)
     
-    # Plan A: Fixed endpoints + Global random middle + Sort
-    # 1. Fixed endpoints
+    # Fixed endpoints; middle indices sampled randomly from the remaining range, then
+    # sorted to preserve temporal order (random.sample does not return sorted output).
     idxs = [0, total_len - 1]
-    # 2. Global random sample for the middle (target_num - 2 frames)
-    # from range(1, total_len - 1)
     middle_idxs = random.sample(range(1, total_len - 1), target_num - 2)
     idxs.extend(middle_idxs)
-    # 3. Sort to maintain temporal order
     idxs.sort()
     return np.array(idxs, dtype=int)
 
@@ -80,9 +77,7 @@ class AlignmentCollator:
             self.pad_token_id = 0
             
         print('self.pad_token_id:', self.pad_token_id)
-            
-        # Standard Visual Augmentation
-        # Configurable Parameters
+
         self.do_color_jitter = CONFIG.AUGMENTATION.get('BRIGHTNESS', True) or \
                                CONFIG.AUGMENTATION.get('CONTRAST', True)
 
@@ -92,7 +87,6 @@ class AlignmentCollator:
         )
         self.do_random_flip = CONFIG.AUGMENTATION.RANDOM_FLIP
 
-        # Disable augmentation in non-train mode
         if self.mode != 'train':
             self.do_color_jitter = False
             self.do_random_flip = False
@@ -127,14 +121,12 @@ class AlignmentCollator:
                         jitter_transform.hue
                     )
 
-                # Apply params
                 for fn_id in fn_idx:
                     if fn_id == 0 and brightness_factor is not None:
                         img = TF.adjust_brightness(img, brightness_factor)
                     elif fn_id == 1 and contrast_factor is not None:
                         img = TF.adjust_contrast(img, contrast_factor)
 
-                # Capture params
                 img_jitter_params = {
                     'fn_idx': fn_idx.tolist() if hasattr(fn_idx, 'tolist') else fn_idx,
                     'b': float(brightness_factor) if brightness_factor is not None else None,
@@ -163,8 +155,8 @@ class AlignmentCollator:
             if isinstance(p, str) and p.startswith("video://"):
                 # Parse video protocol: "video://<video_path>::<frame_idx>::<width>x<height>"
                 try:
-                    path_and_info = p[8:]  # Remove "video://" prefix
-                    parts = path_and_info.rsplit('::', 2)  # Split by last 2 "::"
+                    path_and_info = p[8:]
+                    parts = path_and_info.rsplit('::', 2)
 
                     if len(parts) == 3:
                         # New protocol with size
@@ -189,27 +181,19 @@ class AlignmentCollator:
         
         for video_path, frame_list in video_frame_groups.items():
             try:
-                # Create decord VideoReader
                 vr = decord.VideoReader(video_path, num_threads=1)
-                
-                # Extract frame indices
                 indices = [frame_idx for _, frame_idx, _, _ in frame_list]
-                
-                # Batch read using decord
                 frames_np = vr.get_batch(indices).asnumpy()
-                
-                # Convert to PIL Images and store in map (with resize if needed)
+
                 for i, (path_idx, frame_idx, target_w, target_h) in enumerate(frame_list):
                     frame = frames_np[i]  # (H, W, C)
                     img = Image.fromarray(frame.astype(np.uint8)).convert('RGB')
-                    
-                    # Resize if target size specified
+
                     if target_w is not None and target_h is not None:
                         img = img.resize((target_w, target_h), Image.BILINEAR)
-                    
+
                     video_frames_map[(video_path, frame_idx)] = img
-                
-                # Release decord VideoReader
+
                 del vr
                     
             except Exception as e:
@@ -226,24 +210,21 @@ class AlignmentCollator:
         for idx, p in enumerate(paths):
             img = None
             if isinstance(p, str) and p.startswith("video://"):
-                # Retrieve from pre-loaded batch
                 try:
                     path_and_info = p[8:]
                     parts = path_and_info.rsplit('::', 2)
-                    
+
                     if len(parts) == 3:
-                        # New protocol with size: ignore size in retrieval
-                        video_path, frame_idx_str, _ = parts  # size_str not needed here
+                        # size is only needed at load time (Phase 2), not for the map lookup key
+                        video_path, frame_idx_str, _ = parts
                         frame_idx = int(frame_idx_str)
                     else:
-                        # Old protocol without size
                         video_path, frame_idx_str = path_and_info.rsplit('::', 1)
                         frame_idx = int(frame_idx_str)
-                    
+
                     img = video_frames_map.get((video_path, frame_idx))
-                    
+
                     if img is None:
-                        # Fallback if not found
                         print(f"[AlignmentCollator load_imgs] Fallback to black image for {video_path} frame {frame_idx} (Phase 3: img is None)")
                         img = Image.new('RGB', (CONFIG.IMAGE_SIZE, CONFIG.IMAGE_SIZE), (0, 0, 0))
                 except Exception as e:
@@ -257,16 +238,15 @@ class AlignmentCollator:
                 img = Image.fromarray(p).convert('RGB')
             
             elif torch.is_tensor(p):
-                # Handle torch tensor (C, H, W) or (H, W, C)
+                # Accepts (C, H, W) or (H, W, C)
                 if p.dim() == 3:
                     if p.shape[0] == 3:  # C, H, W
                         p = p.permute(1, 2, 0)
                     img = Image.fromarray(p.cpu().numpy().astype(np.uint8)).convert('RGB')
                 else:
                     img = Image.new('RGB', (CONFIG.IMAGE_SIZE, CONFIG.IMAGE_SIZE), (0, 0, 0))
-            
+
             else:
-                # Regular file path
                 img = Image.open(p).convert('RGB')
             
             imgs.append(img)
@@ -372,7 +352,6 @@ class AlignmentCollator:
                         f for idx in chunk_indices
                         for f in orig_data['ref_frame_paths_str'][idx * c_size : (idx + 1) * c_size]]
 
-                # Chosen steps
                 if 'chosen_steps' in orig_data:
                     chunk_data['chosen_steps'] = orig_data['chosen_steps'][chunk_indices]
                 if 'ref_chosen_steps' in orig_data:
@@ -828,7 +807,7 @@ class AlignmentDataset(Dataset):
         self.video_weights = []
         self.video_dataset_types = []  # Store dataset type for each video (for path transforms)
 
-        # 1. Try loading from provided argument (supporting list/comma-separated)
+        # Supports list or comma-separated string
         if video_paths_json:
             if isinstance(video_paths_json, str):
                 paths = [p.strip() for p in video_paths_json.split(',')]
@@ -837,7 +816,6 @@ class AlignmentDataset(Dataset):
             else:
                 paths = []
             
-            # Helper to extract dataset name
             def get_dataset_name(json_path):
                 # e.g. /path/to/berkeley_autolab_ur5_video_paths.json -> berkeley_autolab_ur5
                 base = os.path.basename(json_path)
@@ -862,7 +840,6 @@ class AlignmentDataset(Dataset):
                             temp_paths[ds_name] = parsed_paths
                             dataset_counts[ds_name] = len(data)
                             dataset_types[ds_name] = ds_name  # dataset_name 即为 dataset_type
-                            # Get weight from config, default to 1.0
                             ds_weight = CONFIG.DATA.DATASET_WEIGHTS.get(ds_name, 1.0)
                             dataset_weights[ds_name] = ds_weight
                         else:
@@ -870,7 +847,6 @@ class AlignmentDataset(Dataset):
                 else:
                     print(f"Warning: Provided video_paths file not found: {path}")
             
-            # Report Probabilities
             total_weighted_count = sum(c * w for k, c in dataset_counts.items() for w in [dataset_weights[k]])
             print("\n--- Dataset Sampling Probabilities ---")
             for name, count in dataset_counts.items():
@@ -879,9 +855,8 @@ class AlignmentDataset(Dataset):
                 print(f"Dataset: {name}, Count: {count}, Weight: {w}, Sampling Prob: {prob:.4f}")
             print("--------------------------------------\n")
 
-            # Flatten into lists
             for name, paths_list in temp_paths.items():
-                ds_type = dataset_types[name]  # 获取数据集类型
+                ds_type = dataset_types[name]
                 self.video_paths.extend(paths_list)
                 self.video_dataset_names.extend([name] * len(paths_list))
                 self.video_dataset_types.extend([ds_type] * len(paths_list))  # 存储类型
@@ -891,10 +866,9 @@ class AlignmentDataset(Dataset):
         if not self.video_paths:
             print(f"WARNING: No video paths loaded.")
         
-        # Skip path validation for all modes
+        # No path validation is performed in any mode
         print(f"Total video paths loaded: {len(self.video_paths)}")
-        
-        # Views to sample from
+
         self.views = ['images']
 
         # Prepare weights for WeightedRandomSampler (per item in __len__)
@@ -1073,7 +1047,6 @@ class AlignmentDataset(Dataset):
         Returns:
             list: 文件路径或帧路径列表
         """
-        # 解析video_info
         if isinstance(video_info, str):
             # 旧格式兼容：直接作为路径
             video_dir = video_info
@@ -1085,7 +1058,6 @@ class AlignmentDataset(Dataset):
             frame_start = video_info.get('frame_start')
             frame_end = video_info.get('frame_end')
         
-        # 检查是否有mp4文件
         mp4_files = glob.glob(os.path.join(video_dir, '*.mp4'))
         
         if mp4_files:
@@ -1100,21 +1072,17 @@ class AlignmentDataset(Dataset):
             
             if not target_mp4:
                 print(f"Warning: No mp4 file found for view: {view}")
-                # 如果没找到匹配的，使用第一个mp4
                 target_mp4 = mp4_files[0]
-            
-            # 获取帧列表
+
             try:
                 vr = decord.VideoReader(target_mp4, num_threads=1)
                 num_frames = len(vr)
-                
-                # Get original video dimensions from first frame
+
                 sample_frame = vr[0].asnumpy()
                 orig_height, orig_width = sample_frame.shape[:2]
-                
+
                 del vr  # Immediately release resources after getting dimensions
-                
-                # Calculate target size using smart_resize
+
                 try:
                     target_height, target_width = smart_resize(
                         height=orig_height,
@@ -1125,10 +1093,8 @@ class AlignmentDataset(Dataset):
                     )
                 except ValueError as e:
                     print(f"Warning: smart_resize failed for {target_mp4}: {e}")
-                    # Fallback to fixed size
                     target_width, target_height = 224, 224
-                
-                # 应用帧范围裁剪
+
                 if frame_start is not None and frame_end is not None:
                     # 新格式: 只返回segment范围内的帧
                     files = [
@@ -1153,7 +1119,6 @@ class AlignmentDataset(Dataset):
         else:
             path = video_dir
         
-        # Fallback to image files
         files = glob.glob(os.path.join(path, '*.jpg')) + glob.glob(os.path.join(path, '*.png'))
         
         def get_sort_key(f):
@@ -1186,7 +1151,6 @@ class AlignmentDataset(Dataset):
             frame_start = video_info.get('frame_start')
             frame_end   = video_info.get('frame_end')
 
-        # mp4 mode
         mp4 = os.path.join(video_dir, f'{view}.mp4')
         if os.path.exists(mp4):
             try:
@@ -1200,7 +1164,6 @@ class AlignmentDataset(Dataset):
                 # Raise error if file exists but is unreadable (e.g. moov atom missing)
                 raise ValueError(f"Failed to read video file {mp4} in _get_view_frame_count: {e}")
 
-        # image directory mode
         img_dir = os.path.join(video_dir, view)
         if os.path.isdir(img_dir):
             return len(glob.glob(os.path.join(img_dir, '*.jpg')) +
@@ -1215,7 +1178,6 @@ class AlignmentDataset(Dataset):
         in train mode it uses a random offset window ('offset_uniform').
         """
         if self.mode == 'eval':
-            # Deterministic: pick num_steps frames evenly spaced across the sequence
             if seq_len <= num_steps:
                 steps = np.arange(0, seq_len)
                 if len(steps) < num_steps:
@@ -1228,18 +1190,15 @@ class AlignmentDataset(Dataset):
             if seq_len < random_offset:
                 # Fallback if video is too short
                 steps = np.arange(0, min(seq_len, num_steps))
-                # Pad if needed
                 if len(steps) < num_steps:
                     steps = np.pad(steps, (0, num_steps - len(steps)), 'edge')
             else:
                 if num_steps <= seq_len - random_offset:
-                    # Sample random offset
                     offset = random_offset
-                    # Sample random frames from [offset, seq_len)
                     available_indices = np.arange(offset, seq_len)
                     np.random.shuffle(available_indices)
                     steps = available_indices[:num_steps]
-                    # Sort them to keep temporal order
+                    # Sort to keep temporal order
                     steps = np.sort(steps)
                 else:
                     # Fallback: sample all available
@@ -1283,16 +1242,13 @@ class AlignmentDataset(Dataset):
             if not reverse:
                 start = step - (num_context - 1) * stride
                 end = step + stride
-                # Generate indices
                 indices = np.arange(start, end, stride)
             else:
                 # [step + (num-1)*stride, ..., step]
                 start = step + (num_context - 1) * stride
                 end = step - stride
-                # Generate indices in descending order
                 indices = np.arange(start, end, -stride)
-            
-            # Clip to valid range [0, seq_len-1]
+
             indices = np.clip(indices, 0, seq_len - 1)
             context_steps.append(indices)
             
@@ -1637,11 +1593,7 @@ class AlignmentDataset(Dataset):
             )
             return None
 
-        # Get Task Paths (Reference Videos)
-        # Determine task_paths_file location based on format
         video_dir = video_info.get('video_dir') if isinstance(video_info, dict) else video_info
-
-        # In eval mode, we use task_paths_eval.json; in train mode, task_paths.json
         filename = 'task_paths_eval.json' if self.mode == 'eval' else 'task_paths.json'
 
         if isinstance(video_info, dict) and video_info.get('segment_id') is not None:
@@ -1652,7 +1604,6 @@ class AlignmentDataset(Dataset):
             # Old format: load from video root directory
             task_paths_file = os.path.join(video_dir, filename)
 
-        # Apply path transformation based on dataset type
         task_paths_file = self._apply_task_paths_transform(task_paths_file, dataset_type)
 
         # Load task_paths directly (no cache)
@@ -1669,7 +1620,6 @@ class AlignmentDataset(Dataset):
             else:
                 print(f"WARNING: task_paths.json not found at {task_paths_file}. Falling back to self-alignment.")
 
-        # Select reference video
         if self.mode == 'eval':
             if "same" in task_paths and task_paths["same"]:
                 ref_video_info = self._parse_video_path(task_paths["same"][0], dataset_name)
@@ -1701,7 +1651,6 @@ class AlignmentDataset(Dataset):
         ref_image_dirs = cam_list
         align_image_dirs = cam_list
 
-        # Get files using resolved view
         main_files = self._get_files(video_info, view=view)
         ref_files = self._get_files(ref_video_info, view=ref_view)
         align_files = self._get_files(align_video_info, view=align_view)
@@ -1715,7 +1664,6 @@ class AlignmentDataset(Dataset):
             align_files = main_files
             align_video_info = video_info
 
-        # Read instructions (use video_dir for path construction)
         main_video_dir = video_info.get('video_dir') if isinstance(video_info, dict) else video_info
         instruction_path = os.path.join(main_video_dir, 'instruction.txt')
         instruction = "Perform the task."
@@ -1757,17 +1705,14 @@ class AlignmentDataset(Dataset):
         }
 
     def _get_item_impl(self, index):
-        # Map index to video
         video_idx = index // len(self.views)
-        
+
         # ==================== STAGE 1: Data Loading ====================
         loaded_data = self._load_video_data_from_json(video_idx)
-        
+
         if loaded_data is None:
-            # Retry with random index
             return self._get_item_impl(random.randint(0, len(self) - 1))
-        
-        # Extract loaded data
+
         video_path = loaded_data['video_path']
         dataset_name = loaded_data['dataset_name']
         main_files = loaded_data['main_files']
@@ -1860,23 +1805,19 @@ class AlignmentDataset(Dataset):
         num_views = 3
         num_ctx = CONFIG.DATA.NUM_STEPS // num_views   # frames per view per anchor
 
-        # Context Expansion (Sampling sparse chunks for the groups)
         main_context_steps = self._get_context_steps(main_steps, len(main_files), video_path, num_context=num_ctx)
         ref_context_steps = self._get_context_steps(ref_steps, len(ref_files), ref_video_path, num_context=num_ctx)
-        
-        # Construct frame_paths
+
         view = loaded_data['view']
 
         # num_views and cam_list_ld already set above from loaded_data['cam_list'].
         ref_view = loaded_data.get('ref_view', view)
 
-        # Main paths
         main_frame_paths = self._context_steps_to_paths(main_context_steps, main_files)
         if num_views > 1 and cam_list_ld:
             main_frame_paths, _ = self._apply_multiview_n_views(
                 main_frame_paths, view, cam_list_ld, num_ctx)
 
-        # Ref paths
         final_ref_paths = self._context_steps_to_paths(ref_context_steps, ref_files)
         if num_views > 1 and cam_list_ld:
             final_ref_paths, _ = self._apply_multiview_n_views(
@@ -1902,7 +1843,6 @@ class AlignmentDataset(Dataset):
         main_align_frame_paths_list    = align_frame_paths_list
         num_align_frames_total = len(align_frame_paths_list)
 
-        # Construct Output
         data = {
             'chosen_steps': torch.from_numpy(main_steps),
             'ref_chosen_steps': torch.from_numpy(ref_steps),
@@ -1934,11 +1874,8 @@ class AlignmentDataset(Dataset):
     def __getitem__(self, index):
         while True:
             try:
-                # print(f"Getting item {index}")
                 return self._get_item_impl(index)
             except Exception as e:
-                # print(f"Error getting item {index}: {e}")
-                # Get video_idx and path information for better error logging
                 video_idx = index // len(self.views)
                 video_path = self.video_paths[video_idx] if video_idx < len(self.video_paths) else "Unknown"
                 
@@ -1953,16 +1890,13 @@ class AlignmentDataset(Dataset):
 
 def get_transforms(mode='train'):
     transforms_list = []
-    
-    # Resize
+
     transforms_list.append(transforms.Resize((CONFIG.IMAGE_SIZE, CONFIG.IMAGE_SIZE)))
-    
+
     if mode == 'train':
-        # Augmentation
         if CONFIG.AUGMENTATION.RANDOM_FLIP:
             transforms_list.append(transforms.RandomHorizontalFlip(p=0.5))
 
-        # Color Jitter
         brightness = CONFIG.AUGMENTATION.BRIGHTNESS_MAX_DELTA if CONFIG.AUGMENTATION.BRIGHTNESS else 0
         contrast = 0.5 if CONFIG.AUGMENTATION.CONTRAST else 0 # TF used lower=0.5, upper=1.5 -> factor ~0.5
 
@@ -2067,7 +2001,6 @@ def create_dataset(split, mode, batch_size=None, return_iterator=True, distribut
     
     if distributed:
         if use_weighted_sampler and mode == 'train':
-             # Use WeightedRandomSampler on each rank (only for training)
              weights = torch.DoubleTensor(dataset.weights)
              # Fix: Use a generator seeded by rank to ensure different data on each rank
              rank = torch.distributed.get_rank()
@@ -2096,18 +2029,17 @@ def create_dataset(split, mode, batch_size=None, return_iterator=True, distribut
              shuffle = (mode == 'train')
     
     collator = AlignmentCollator(processor=processor, mode=mode)
-    
-    # Use fewer workers for eval to avoid initialization issues
+
     num_workers = 12 if mode == 'train' else 12
 
     dataloader = DataLoader(
-        dataset, 
-        batch_size=batch_size, 
-        shuffle=shuffle, 
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
         sampler=sampler,
-        num_workers=num_workers, 
+        num_workers=num_workers,
         pin_memory=True,
-        drop_last=(mode == 'train'),  # Only drop last batch in training mode
+        drop_last=(mode == 'train'),
         collate_fn=collator,
         worker_init_fn=worker_init_fn
     )

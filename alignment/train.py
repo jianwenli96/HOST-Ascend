@@ -42,7 +42,6 @@ FLAGS = flags.FLAGS
 
 def train(argv):
   """Trains model and evaluates on relevant downstream tasks."""
-  # Update CONFIG with flags
   if FLAGS.save_interval is not None:
       CONFIG.CHECKPOINT.SAVE_INTERVAL = FLAGS.save_interval
   
@@ -56,7 +55,6 @@ def train(argv):
   if FLAGS.network:
       CONFIG.MODEL.BASE_MODEL.NETWORK = FLAGS.network
 
-  # DeepSpeed Setup
   deepspeed.init_distributed()
   local_rank = int(os.environ.get("LOCAL_RANK", -1))
   torch.cuda.set_device(local_rank)
@@ -72,18 +70,16 @@ def train(argv):
   
   if is_master:
       setup_train_dir(logdir)
-      # WandB Init
       import wandb
       wandb.init(project=os.environ.get("WANDB_PROJECT", "tcc_experiment"), 
                  dir=logdir,
                  config=to_dict(CONFIG))
 
-  # Device configuration
   if is_master:
       logging.info('Using device: %s', device)
 
   algo = Alignment()
-  # algo.to(device) # DeepSpeed will handle this
+  # DeepSpeed will handle moving the model to device
 
   # Warm-start from a single pytorch state-dict file (strict=False).
   # MUST be done BEFORE deepspeed.initialize() so that DeepSpeed's fp32 master copy
@@ -106,7 +102,6 @@ def train(argv):
               logging.warning(f"pretrain_weights: unexpected extra keys: {unexpected[:10]}")
       del raw, state_dict  # free CPU memory before DeepSpeed moves model to GPU
 
-  # Setup DeepSpeed
   ds_config_path = FLAGS.ds_config
   if is_master:
       logging.info(f"Loading DeepSpeed config from: {ds_config_path}")
@@ -119,11 +114,9 @@ def train(argv):
       if is_master:
           logging.info(f"Overriding gradient_accumulation_steps to {FLAGS.gradient_accumulation_steps}")
 
-  # Override DeepSpeed config with CONFIG.py values
   if is_master:
       logging.info("Overriding DeepSpeed config with values from config.py")
 
-  # Recursively update ds_config with CONFIG.DS_CONFIG
   # We only update keys that exist in CONFIG.DS_CONFIG
   # This allows ds_config.json to keep infrastructure settings (ZeRO, fp16, etc.)
   # while config.py controls training hyperparameters.
@@ -137,7 +130,6 @@ def train(argv):
       return d
 
   if 'DS_CONFIG' in CONFIG:
-      # Convert EasyDict to dict for compatibility
       ds_overrides = to_dict(CONFIG.DS_CONFIG)
       
       # Special handling for scheduler and optimizer: 
@@ -164,7 +156,6 @@ def train(argv):
       config=ds_config
   )
   
-  # Restore checkpoint
   load_path = None
   if FLAGS.resume_dir:
       if is_master:
@@ -177,8 +168,6 @@ def train(argv):
       if is_master:
           logging.info(f"Resumed from checkpoint: {load_path}")
       
-      # Try to retrieve global_step
-      # First check if client_state has the step information
       if client_state and 'step' in client_state:
           global_step = client_state['step']
       else:
@@ -194,7 +183,6 @@ def train(argv):
               elif tag.startswith('global_step'):
                   global_step = int(tag.split('global_step')[-1])
               else:
-                   # Try to find any sequence of digits at the end of the string
                    match = re.search(r'(\d+)$', tag)
                    if match:
                        global_step = int(match.group(1))
@@ -216,7 +204,6 @@ def train(argv):
               logging.warning(f"Resume directory provided ({FLAGS.resume_dir}) but no checkpoint found/loaded.")
           logging.info("Starting from scratch.")
 
-  # Initialize Processor for Qwen
   processor = None
   if 'Qwen' in CONFIG.MODEL.BASE_MODEL.NETWORK:
       try:
@@ -244,7 +231,6 @@ def train(argv):
           )
       # No resize needed: 151669+192=151861 < vocab_size=151936
 
-  # Setup Dataset
   train_loader = create_dataset('train', mode='train',
                                 batch_size=model_engine.train_micro_batch_size_per_gpu(),
                                 return_iterator=True,
@@ -266,8 +252,7 @@ def train(argv):
           
       steps = data['chosen_steps']
       seq_lens = data['seq_lens']
-      
-      # Data preparation
+
       for k, v in data.items():
           if isinstance(v, torch.Tensor):
               data[k] = v.to(device)
@@ -283,16 +268,13 @@ def train(argv):
       steps = steps.to(device)
       seq_lens = seq_lens.to(device)
 
-      # Forward pass
       embs = model_engine(data, steps, seq_lens, training=True)
 
-      # Compute loss
       loss, loss_dict = model_engine.module.compute_loss(embs, steps, seq_lens, current_step,
                                         training=True, frame_labels=data.get('frame_labels'),
                                         seq_labels=data.get('seq_labels'),
                                         metadata=data)
 
-      # --- Per-Dataset Loss & High Loss Debugging ---
       if is_master:
           log_and_save_high_loss_samples(logdir, current_step, loss_dict, data)
 
@@ -304,7 +286,7 @@ def train(argv):
           if is_master:
               pbar.update(1)
 
-      # scheduler.step() # DeepSpeed handles scheduler step
+      # DeepSpeed handles scheduler.step() automatically
 
       if is_master:
           pbar.set_description(f"Step {current_step}/{max_iters}")
@@ -314,8 +296,7 @@ def train(argv):
       
       if is_master and current_step % CONFIG.LOGGING.REPORT_INTERVAL == 0:
           log_dict = {'loss': loss.item(), 'lr': model_engine.get_lr()[0]}
-          
-          # Add detailed losses
+
           if loss_dict:
               for k, v in loss_dict.items():
                   # Skip logging large tensors (like per_sample_loss or alignment_indices) to wandb scalars

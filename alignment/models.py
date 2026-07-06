@@ -49,13 +49,10 @@ class BaseModel(nn.Module):
         self.num_steps = num_steps
 
     def forward(self, x):
-        # Handle Qwen dictionary input
         if isinstance(x, dict) and 'qwen_input' in x:
             inputs = x['qwen_input']
             # inputs keys: input_ids, attention_mask, pixel_values, image_grid_thw
-            
-            # Run model
-            # Ensure inputs are on the correct device
+
             device = self.base_model.device
             for k, v in inputs.items():
                 if isinstance(v, torch.Tensor):
@@ -76,7 +73,6 @@ class BaseModel(nn.Module):
             if 'video_grid_thw' in inputs and inputs['video_grid_thw'] is not None:
                 forward_kwargs['video_grid_thw'] = inputs['video_grid_thw']
 
-            # Step 4: Inject Group Info for Attention Mask
             if 'num_mains' in inputs and 'num_refs' in inputs:
                 forward_kwargs['num_video_groups'] = inputs['num_mains'] + inputs['num_refs']
                 forward_kwargs['num_mains'] = inputs['num_mains']
@@ -93,16 +89,14 @@ class BaseModel(nn.Module):
             hidden_states = outputs.hidden_states[-1] # (Total_Frames, Seq_Len, Hidden_Size)
 
             input_ids = inputs['input_ids']
-            
+
             vision_start_token_id = self.base_model.config.vision_start_token_id
             vision_end_token_id = self.base_model.config.vision_end_token_id
-            
+
             # Vectorized implementation for efficiency
-            # Identify positions of start and end tokens
             is_start = (input_ids == vision_start_token_id)
             is_end = (input_ids == vision_end_token_id)
-            
-            # Cumulative sums to identify regions
+
             # cs_start[i, j] tells us how many start tokens have appeared up to index j
             cs_start = is_start.long().cumsum(dim=1)
             cs_end = is_end.long().cumsum(dim=1)
@@ -113,8 +107,7 @@ class BaseModel(nn.Module):
                 num_mains = inputs['num_mains']
                 num_refs = inputs['num_refs']
                 group_size = CONFIG.DATA.NUM_STEPS
-                
-                # Identify CLS tokens if available
+
                 cls_token_id = inputs.get('cls_token_id')
                 if cls_token_id is not None:
                     # cls_token_id is usually a tensor [ID] or scalar
@@ -137,8 +130,8 @@ class BaseModel(nn.Module):
                     
                     sample_embs = []
 
-                    # 1. Try CLS Extraction (Preferred)
-                    # We expect exactly n_m + n_r CLS tokens (one after each group video)
+                    # CLS extraction (preferred): expect exactly n_m + n_r CLS tokens
+                    # (one after each group video).
                     if is_cls is not None:
                         cls_indices = torch.where(is_cls[b])[0]
                         # The first few CLS tokens might belong to the align video if it was processed similarly,
@@ -151,14 +144,12 @@ class BaseModel(nn.Module):
 
                             sample_embs.append(emb)
 
-                    # 2. Warning if CLS not found or incomplete
                     if len(sample_embs) < (n_m + n_r):
                         print(f"Warning: Incomplete CLS tokens found for batch {b}. Expected {n_m + n_r}, found {len(sample_embs)}.")
                         # Fill remaining with zeros to avoid shape mismatch
                         for _ in range(len(sample_embs), n_m + n_r):
                             sample_embs.append(torch.zeros(hs_b.shape[-1], device=hs_b.device, dtype=hs_b.dtype))
 
-                    # Split
                     all_mains_embs.extend(sample_embs[:n_m])
                     all_refs_embs.extend(sample_embs[n_m:])
 
@@ -182,8 +173,7 @@ class BaseModel(nn.Module):
                 # AND we have seen `target_img_idx - 1` ends.
                 # We exclude the start token itself (~is_start).
                 mask = (cs_start == target_img_idx) & (cs_end == (target_img_idx - 1)) & (~is_start)
-                
-                # Compute pooled embeddings
+
                 # Expand mask to match hidden_states dimensions: (B, L, 1)
                 mask_expanded = mask.unsqueeze(-1).to(hidden_states.dtype)
                 
@@ -197,15 +187,12 @@ class BaseModel(nn.Module):
                 count_tokens = torch.clamp(count_tokens, min=1e-9)
                 
                 pooled_embeddings = sum_embeddings / count_tokens # (Total_Frames, H)
-                
-                # Reshape to (B, T, H, 1, 1)
+
                 if self.training:
-                    # Training: Use fixed config
                     num_steps = CONFIG.TRAIN.NUM_FRAMES
                     total_frames = pooled_embeddings.shape[0]
                     batch_size = total_frames // num_steps
-                    
-                    # Sanity check for training
+
                     if batch_size * num_steps != total_frames:
                         raise ValueError(f"Training shape mismatch: Total frames {total_frames} not divisible by num_steps {num_steps}")
                 else:
@@ -227,25 +214,19 @@ class BaseModel(nn.Module):
                         # For Batch=1, the single sequence length is the num_steps
                         num_steps = int(seq_lens[0].item())
                         
-                        # Verify consistency with actual output
                         if pooled_embeddings.shape[0] != num_steps:
-                            # It's possible seq_lens was original frames, but we extracted fewer?
-                            # For now just trust the extracted count if mismatch, or use extracted count.
-                            # But TCC eval usually needs reshaping.
+                            # seq_lens may reflect the original frame count rather than the
+                            # extracted count; fall through and use the extracted count below.
                             pass
-                            
-                        # Overwrite num_steps to match actual output if needed, or use seq_lens
+
                         if pooled_embeddings.shape[0] != num_steps:
-                             # print(f"Warning: Output embeddings count {pooled_embeddings.shape[0]} != seq_len {num_steps}. Using output count.")
                              num_steps = pooled_embeddings.shape[0]
                     else:
-                        # Fallback if no metadata
-                        # Assume Num_Frames from Config or just Treat as T=Total, B=1
+                        # No seq_len metadata: assume batch_size=1, num_steps=all extracted frames
                         num_steps = pooled_embeddings.shape[0]
                         batch_size = 1
 
-                # return pooled_embeddings.view(batch_size, num_steps, -1, 1, 1)
-                # Return flattened embeddings as requested by train.py logic
+                # Return flattened embeddings as required by train.py's merge logic
                 return pooled_embeddings
 
         raise RuntimeError("BaseModel.forward expects Qwen dict input with a 'qwen_input' key.")

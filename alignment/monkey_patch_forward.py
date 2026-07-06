@@ -82,7 +82,6 @@ def qwen3_vl_moe_mixed_modality_forward(
     visual_pos_masks = None
     deepstack_visual_embeds = None
     if image_mask is not None and video_mask is not None:
-        # aggregate visual_pos_masks and deepstack_visual_embeds
         image_mask = image_mask[..., 0]
         video_mask = video_mask[..., 0]
         visual_pos_masks = image_mask | video_mask
@@ -216,16 +215,13 @@ def _apply_group_position_ids(position_ids, group_starts, batch_idx=0):
         start_k = group_starts[k]
         end_k = group_starts[k+1]
         
-        # Current start position of Group K
         current_pos_start = position_ids[:, batch_idx, start_k] # Shape: (3,)
-        
-        # Calculate Shift Vector
+
         # We want: new_pos_start == anchor_pos
         # So: current_pos_start - shift = anchor_pos
         # shift = current_pos_start - anchor_pos
         shift = current_pos_start - anchor_pos # Shape: (3,)
-        
-        # Apply shift to the entire block of Group K
+
         # position_ids slice shape: (3, len_k)
         # shift aligned for broadcasting: (3, 1)
         shift_broadcast = shift.unsqueeze(-1)
@@ -297,7 +293,6 @@ def qwen3_vl_mixed_modality_forward(
     visual_pos_masks = None
     deepstack_visual_embeds = None
     if image_mask is not None and video_mask is not None:
-        # aggregate visual_pos_masks and deepstack_visual_embeds
         image_mask = image_mask[..., 0]
         video_mask = video_mask[..., 0]
         visual_pos_masks = image_mask | video_mask
@@ -372,14 +367,13 @@ def qwen3_vl_mixed_modality_forward(
             position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
 
     # ----------------------------------------------------------------------
-    # Custom Packed Sequence Logic (Step 2): Token-Based Group Boundary Detection
+    # Custom Packed Sequence Logic: Token-Based Group Boundary Detection
     # ----------------------------------------------------------------------
     # Use special tokens to mark boundaries:
     # - <|fim_pad|> (CONFIG.SPECIAL_TOKENS.ALIGN_END_TOKEN_ID): marks the end of align video
     # - <|file_sep|> (CONFIG.SPECIAL_TOKENS.CLS_TOKEN_ID): marks the end of each group video
     # This approach is independent of model's temporal compression ratio.
-    
-    # 1. Expand Attention Mask to 4D if needed (Once for the whole batch)
+
     if attention_mask is not None:
         if attention_mask.ndim == 2:
             bsz, seq_len = input_ids.shape
@@ -397,42 +391,36 @@ def qwen3_vl_mixed_modality_forward(
             padding_mask = attention_mask.to(torch.bool)
             mask.masked_fill_(~padding_mask[:, None, None, :], min_dtype)
 
-            attention_mask = mask  # Updated to 4D
+            attention_mask = mask
         else:
             # If it was already 4D, ensure we clone it so we don't modify shared views or inputs directly
             attention_mask = attention_mask.clone()
 
-    # 2. Clone Position IDs to allow in-place modification
     if position_ids is not None:
         position_ids = position_ids.clone()
-    
-    # 3. Iterate over Batch
+
     batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
-    
+
     if input_ids is not None:
         for b in range(batch_size):
-            # 1. Get special token IDs (from kwargs or fallback to CONFIG)
             align_end_token_id = kwargs.get('align_end_token_id')
             if align_end_token_id is not None:
                 if hasattr(align_end_token_id, 'item'):
                     align_end_token_id = align_end_token_id.item()
             else:
-                # Fallback to CONFIG
                 align_end_token_id = CONFIG.SPECIAL_TOKENS.ALIGN_END_TOKEN_ID
-            
+
             cls_id = kwargs.get('cls_token_id')
             if cls_id is not None:
                 if hasattr(cls_id, 'item'):
                     cls_id = cls_id.item()
             else:
-                # Fallback to CONFIG
                 cls_id = CONFIG.SPECIAL_TOKENS.CLS_TOKEN_ID
-            
+
             if cls_id is None or align_end_token_id is None:
                 print(f"Warning: No special tokens found for batch {b}. Skipping.")
-                continue  # Skip samples without special tokens
-            
-            # 2. Find align video end marker
+                continue
+
             align_end_indices = torch.where(input_ids[b] == align_end_token_id)[0]
             if len(align_end_indices) != 1:
                 raise ValueError(
@@ -440,26 +428,21 @@ def qwen3_vl_mixed_modality_forward(
                     f"found {len(align_end_indices)}"
                 )
             align_video_end = align_end_indices[0].item() + 1
-            
-            # 3. Find all group end markers (CLS tokens)
+
             cls_indices = torch.where(input_ids[b] == cls_id)[0]
-            
-            # 4. Verify CLS token count
+
             if 'num_mains' in kwargs and 'num_refs' in kwargs:
                 expected_num_cls = kwargs['num_mains'][b].item() + kwargs['num_refs'][b].item()
                 if len(cls_indices) != expected_num_cls:
                     print(f"Warning: Batch {b}: Expected {expected_num_cls} CLS tokens (<|file_sep|>, ID={cls_id}), found {len(cls_indices)}")
-            
-            # 5. Build group_starts array
-            # group_starts[k] is the start position of group k
-            # group_starts[-1] is the content_end
+
+            # group_starts[k] is the start position of group k; group_starts[-1] is the content_end
             group_starts = [align_video_end]  # First group starts after align video
             for cls_pos in cls_indices[:-1]:
                 group_starts.append(cls_pos.item() + 1)  # Next group starts after CLS
             content_end = cls_indices[-1].item() + 1
             group_starts.append(content_end)
-            
-            # 6. Apply attention_mask and position_ids modifications
+
             if attention_mask is not None:
                 attention_mask = _apply_group_attention_mask(
                     attention_mask, input_ids, inputs_embeds, group_starts,

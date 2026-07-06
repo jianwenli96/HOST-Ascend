@@ -42,7 +42,6 @@ def evaluate(argv):
   # FLAGS-based overrides below take priority over anything set here.
   apply_eval_overrides()
 
-  # FLAGS-based overrides (highest priority)
   if FLAGS.network:
       CONFIG.MODEL.BASE_MODEL.NETWORK = FLAGS.network
 
@@ -59,7 +58,6 @@ def evaluate(argv):
       CONFIG.TRAIN.NUM_ALIGN_FRAMES = FLAGS.num_align_frames
       print(f"Override NUM_ALIGN_FRAMES to {FLAGS.num_align_frames}")
 
-  # DeepSpeed Setup
   deepspeed.init_distributed()
   local_rank = int(os.environ.get("LOCAL_RANK", -1))
   rank = torch.distributed.get_rank()
@@ -74,11 +72,9 @@ def evaluate(argv):
       print(f"Multi-GPU evaluation: Using {world_size} GPUs")
   print(f"[Rank {rank}] Initialized")
 
-  # Setup log directory
   if FLAGS.logdir:
       logdir = FLAGS.logdir
   elif FLAGS.resume_dir:
-      # If no logdir specified, save results in resume_dir
       logdir = FLAGS.resume_dir
   else:
       raise ValueError("Either --logdir or --resume_dir must be specified.")
@@ -91,7 +87,6 @@ def evaluate(argv):
 
   algo = Alignment()
 
-  # Setup DeepSpeed (for loading checkpoint and inference)
   ds_config_path = FLAGS.ds_config
   if is_master:
       logging.info(f"Loading DeepSpeed config from: {ds_config_path}")
@@ -99,12 +94,10 @@ def evaluate(argv):
   with open(ds_config_path, 'r') as f:
       ds_config = json.load(f)
   
-  # Modify DS config for inference
   ds_config['train_batch_size'] = CONFIG.EVAL.BATCH_SIZE * world_size
   ds_config['train_micro_batch_size_per_gpu'] = CONFIG.EVAL.BATCH_SIZE
   ds_config['gradient_accumulation_steps'] = 1
-  
-  # Disable optimizer for inference
+
   if 'optimizer' in ds_config:
       del ds_config['optimizer']
   if 'scheduler' in ds_config:
@@ -124,7 +117,6 @@ def evaluate(argv):
   if not FLAGS.resume_dir:
       raise ValueError("--resume_dir must be specified for evaluation.")
   
-  # Try to load PyTorch model file directly
   checkpoint_files = [
       os.path.join(FLAGS.resume_dir, 'checkpoint.pth.tar'),
       os.path.join(FLAGS.resume_dir, 'fp32_converted', 'pytorch_model.bin'),
@@ -143,10 +135,8 @@ def evaluate(argv):
   if is_master:
       logging.info(f"Loading checkpoint from: {checkpoint_path}")
   
-  # Load checkpoint
   checkpoint = torch.load(checkpoint_path, map_location='cpu')
-  
-  # Extract state dict
+
   if 'state_dict' in checkpoint:
       state_dict = checkpoint['state_dict']
       global_step = checkpoint.get('global_step', 0)
@@ -161,7 +151,6 @@ def evaluate(argv):
   if is_master:
       logging.info(f"Checkpoint global_step: {global_step}")
   
-  # Load state dict into model
   missing_keys, unexpected_keys = algo.load_state_dict(state_dict, strict=False)
   if is_master:
       if missing_keys:
@@ -178,7 +167,6 @@ def evaluate(argv):
       config=ds_config
   )
 
-  # Initialize Processor for Qwen
   processor = None
   if 'Qwen' in CONFIG.MODEL.BASE_MODEL.NETWORK:
       try:
@@ -193,7 +181,6 @@ def evaluate(argv):
           if is_master:
               logging.warning(f"Could not load processor for Qwen: {e}")
 
-  # Setup Dataset - use eval mode with distributed sampling
   contiguous_shard = bool(CONFIG.EVAL.CONTIGUOUS_DISTRIBUTED_SHARD or FLAGS.eval_contiguous_shard)
   eval_loader = create_dataset('train', mode='eval',
                                batch_size=CONFIG.EVAL.BATCH_SIZE,
@@ -203,7 +190,6 @@ def evaluate(argv):
                                processor=processor,
                                contiguous_distributed_eval=contiguous_shard)
 
-  # Set model to eval mode
   model_engine.eval()
 
   # --- Shared ref-cache index: lets DataLoader workers know which refs are cached ---
@@ -215,13 +201,11 @@ def evaluate(argv):
   if hasattr(eval_loader, 'collate_fn'):
       eval_loader.collate_fn._ref_cache_index = _ref_cache_index  # worker can read
   
-  # Determine number of iterations
   if FLAGS.num_iters:
       num_iters = FLAGS.num_iters
   else:
       num_iters = len(eval_loader)
-  
-  # Each rank processes a subset of data
+
   if contiguous_shard and hasattr(eval_loader.sampler, '_start'):
       s = eval_loader.sampler
       print(f"[Rank {rank}] Contiguous shard: dataset indices [{s._start}, {s._end}) ({len(eval_loader)} batches)")
@@ -232,16 +216,15 @@ def evaluate(argv):
       pbar = tqdm(total=num_iters, dynamic_ncols=True, desc=f"Rank {rank}")
   
   avg_loss = 0.0
-  
-  with torch.no_grad():  # No gradients needed for evaluation
+
+  with torch.no_grad():
       for i, data in enumerate(eval_loader):
           if i >= num_iters:
               break
           
           steps = data['chosen_steps']
           seq_lens = data['seq_lens']
-          
-          # Data preparation (same as training)
+
           for k, v in data.items():
               if isinstance(v, torch.Tensor):
                   data[k] = v.to(device)
@@ -256,11 +239,9 @@ def evaluate(argv):
           
           steps = steps.to(device)
           seq_lens = seq_lens.to(device)
-          
-          # Forward pass (same as training)
+
           embs = model_engine(data, steps, seq_lens, training=False)
-          
-          # Compute loss (same as training)
+
           loss, loss_dict = model_engine.module.compute_loss(embs, steps, seq_lens, global_step,
                                             training=False, frame_labels=data.get('frame_labels'),
                                             seq_labels=data.get('seq_labels'),
@@ -279,8 +260,7 @@ def evaluate(argv):
               pbar.set_postfix(loss=loss.item(), avg_loss=avg_loss/(i+1), cache=f"{last}|{rate:.2f}")
   
   avg_loss /= num_iters
-  
-  # Gather average loss from all ranks
+
   avg_loss_tensor = torch.tensor([avg_loss], device=device)
   torch.distributed.all_reduce(avg_loss_tensor, op=torch.distributed.ReduceOp.SUM)
   global_avg_loss = avg_loss_tensor.item() / world_size
@@ -294,7 +274,6 @@ def evaluate(argv):
   # Wait for all ranks to finish
   torch.distributed.barrier()
 
-  # Ref cache stats
   if hasattr(model_engine.module, '_ref_cache'):
       cache = model_engine.module._ref_cache
       hits, misses, rate = cache.stats()
@@ -307,7 +286,6 @@ def evaluate(argv):
       for r in range(world_size):
           print(f"  - {logdir}/high_loss_samples_{r}.jsonl")
       
-      # Optionally merge all jsonl files
       print(f"\nMerging results from all ranks...")
       merged_file = os.path.join(logdir, "high_loss_samples_all.jsonl")
       with open(merged_file, 'w') as outf:

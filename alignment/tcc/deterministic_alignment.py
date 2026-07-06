@@ -73,7 +73,6 @@ def pairwise_l2_distance(embs1, embs2):
 def get_scaled_similarity(embs1, embs2, similarity_type, temperature):
   """Returns similarity between each all rows of embs1 and all rows of embs2."""
   channels = float(embs1.size(-1))
-  # Go for embs1 to embs2.
   if similarity_type == 'cosine':
     if embs1.dim() == 2:
         similarity = torch.matmul(embs1, embs2.t())
@@ -106,7 +105,6 @@ def align_pair_of_sequences(embs1,
   """Align a given pair embedding sequences."""
   max_num_steps = embs1.size(-2)
 
-  # Find distances between embs1 and embs2.
   sim_12 = get_scaled_similarity(embs1, embs2, similarity_type, temperature)
 
   # Compute beta: matching probability for each source frame over target frames,
@@ -158,7 +156,6 @@ def align_pair_of_sequences(embs1,
   else:
       nn_embs = torch.bmm(softmaxed_sim_12, embs2)
 
-  # Find distances between nn_embs and embs1.
   sim_21 = get_scaled_similarity(nn_embs, embs1, similarity_type, temperature)
 
   logits = sim_21
@@ -227,14 +224,12 @@ def compute_deterministic_alignment_loss_paired(embs_main,
       logits_flat = logits.view(-1, n)
       labels_flat = labels.view(-1, n)
 
-      # Steps prep
       steps_tiled = steps_tgt.unsqueeze(1).repeat(1, n, 1).view(-1, n)
       seq_lens_tiled = seq_lens_tgt.unsqueeze(1).repeat(1, n).view(-1)
 
       p_loss, _, _ = regression_loss(logits_flat, labels_flat, n, steps_tiled, seq_lens_tiled,
                         normalize_indices, variance_lambda, reduction='none',
                         tcc_regression_margin=tcc_regression_margin)
-
       if scale is not None:
              # Scale applies to Source steps.
              # Scale shape (B, N). p_loss shape (B*N).
@@ -280,13 +275,11 @@ def compute_deterministic_alignment_loss_paired(embs_main,
           d2tw_loss = (d2tw_mr_for_loss.mean() + d2tw_rm_for_loss.mean()) / 2.0
           loss = loss + d2tw_loss * CONFIG.ALIGNMENT.D2TW_LOSS_LAMBDA
 
-  # Aggregate Per Sample Loss for Logging (Main + Ref)
   ps_main = loss_mr_per_sample
   ps_ref = loss_rm_per_sample
 
   full_per_sample_loss = torch.cat([ps_main, ps_ref], dim=0) # (2*B)
 
-  # Compute top-5 alignment candidates and their probabilities
   # sim_mr: (B, T_main, T_ref) or (T_main, T_ref)
   # sim_rm: (B, T_ref, T_main) or (T_ref, T_main)
   top5_k = min(5, sim_mr.shape[-1])  # Handle cases where ref has < 5 frames
@@ -297,8 +290,6 @@ def compute_deterministic_alignment_loss_paired(embs_main,
   # Backward alignment (Ref -> Main): get top-5 main frames for each ref frame
   backward_top5_values, backward_top5_indices = torch.topk(sim_rm, k=top5_k, dim=-1, largest=True, sorted=True)
 
-  # Compute both argmax and DTW indices for logging and comparison
-  # Argmax indices (always computed)
   forward_argmax_indices = torch.argmax(sim_mr, dim=-1)
   backward_argmax_indices = torch.argmax(sim_rm, dim=-1)
 
@@ -309,7 +300,6 @@ def compute_deterministic_alignment_loss_paired(embs_main,
   forward_indices = forward_dtw_indices
   backward_indices = backward_dtw_indices
 
-  # Construct Loss Dict
   loss_dict = {
       'loss_mr': loss_mr,
       'loss_rm': loss_rm,

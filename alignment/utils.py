@@ -55,8 +55,7 @@ def restore_ckpt(logdir, model, optimizer=None, scheduler=None):
         except Exception as e:
             print(f"=> Error loading FP32 state_dict: {e}")
             print("=> Attempting to load with strict=False and ignoring prefixes...")
-            # Add more robust loading logic if needed
-            
+
     else:
         print("=> no checkpoint found at '{}' or '{}'".format(checkpoint_path, fp32_path))
     
@@ -84,13 +83,11 @@ def _convert_to_logical_paths(paths, data_dict, idx):
         if isinstance(data_dict[logical_key], list) and idx < len(data_dict[logical_key]):
             return data_dict[logical_key][idx]
     
-    # Otherwise use the regular paths
     if paths not in data_dict:
         return []
-    
+
     path_list = data_dict[paths][idx] if isinstance(data_dict[paths], list) else data_dict[paths]
-    
-    # Convert to strings
+
     result = []
     for p in path_list:
         if isinstance(p, str):
@@ -119,39 +116,33 @@ def log_and_save_high_loss_samples(logdir, step, loss_dict, data, save_all=False
     if 'per_sample_loss' not in loss_dict:
         return
 
-    # Metadata for reconstruction
     qwen_meta = data.get('qwen_input', {})
     group_ids = qwen_meta.get('group_ids')
-    
+
     if group_ids is not None:
         # We are in chunked/grouped mode
         unique_groups = torch.unique(group_ids).cpu().tolist()
         num_unique = len(unique_groups)
         dataset_names_all = data.get('dataset_name', ["unknown"] * len(group_ids))
-        
-        # Aggregate name/paths for each group
+
         group_data = []
         # In TCC paired mode, we have [Main, Ref] rows. To reconstruct the video,
         # we only need to look at one of these halves to get the unique chunks.
         half_len = len(group_ids) // 2
         for i, g_id in enumerate(unique_groups):
-            # Use only the first half of indices for reconstruction
             indices = (group_ids[:half_len] == g_id).nonzero(as_tuple=True)[0]
-            
-            # Use data from the chunks in this group
+
             # Sort indices by chunk_ids to ensure correct sequence order
             chunk_ids = qwen_meta['chunk_ids'][:half_len][indices]
             sort_idx = torch.argsort(chunk_ids)
             sorted_indices = indices[sort_idx]
-            
-            # Aggregate paths
+
             all_frame_paths = []
             all_ref_frame_paths = []
             for idx in sorted_indices:
                 all_frame_paths.extend(data['frame_paths'][idx])
                 all_ref_frame_paths.extend(data['ref_frame_paths'][idx])
             
-            # Get logical paths if available (for pickle mode) - aggregate all chunks
             all_logical_frame_paths = []
             all_logical_ref_frame_paths = []
             for idx in sorted_indices:
@@ -195,7 +186,6 @@ def log_and_save_high_loss_samples(logdir, step, loss_dict, data, save_all=False
         
         group_data = []
         for i in range(batch_size_val):
-            # Get logical paths if available (for pickle mode)
             logical_frame_paths = _convert_to_logical_paths('frame_paths', data, i)
             logical_ref_frame_paths = _convert_to_logical_paths('ref_frame_paths', data, i)
             
@@ -224,7 +214,6 @@ def log_and_save_high_loss_samples(logdir, step, loss_dict, data, save_all=False
 
     sample_losses = (per_sample_loss[:batch_size_val] + per_sample_loss[batch_size_val:]) / 2.0
     
-    # Aggregate Per-Dataset Loss for this Batch
     dataset_loss_accum = {}
     dataset_counts = {}
     
@@ -237,7 +226,6 @@ def log_and_save_high_loss_samples(logdir, step, loss_dict, data, save_all=False
     for name, total_loss in dataset_loss_accum.items():
         loss_dict[f'loss/{name}'] = total_loss / dataset_counts[name]
     
-    # Debug High Loss
     high_threshold = CONFIG.LOGGING.HIGH_LOSS_THRESHOLD
     low_threshold = CONFIG.LOGGING.LOW_LOSS_THRESHOLD
     max_low_loss = CONFIG.LOGGING.MAX_LOW_LOSS_SAMPLES
@@ -255,34 +243,29 @@ def log_and_save_high_loss_samples(logdir, step, loss_dict, data, save_all=False
             log_and_save_high_loss_samples.low_loss_count = 0
             
         indices_map = {} # idx -> type
-        
-        # If save_all is True, save all samples (for eval mode)
+
         if save_all:
             for idx in range(batch_size_val):
                 indices_map[idx] = "eval_all"
         else:
-            # 1. Identify High Loss
             if (sample_losses > high_threshold).any():
                  high_loss_indices = (sample_losses > high_threshold).nonzero(as_tuple=True)[0]
                  for idx in high_loss_indices:
                      indices_map[idx.item()] = "high_loss"
-                     
-            # 2. Identify Low Loss
+
             if (sample_losses < low_threshold).any():
                 low_loss_indices = (sample_losses < low_threshold).nonzero(as_tuple=True)[0]
                 for idx in low_loss_indices:
                     idx_val = idx.item()
                     if idx_val not in indices_map:
                         indices_map[idx_val] = "low_loss"
-            
-            # 3. Fill rest if Periodic
+
             if save_full_batch:
                 for idx in range(batch_size_val):
                     if idx not in indices_map:
                         indices_map[idx] = "periodic_batch"
         
         if indices_map:
-            # Use rank-specific filename if rank is provided
             if rank is not None:
                 jsonl_file = os.path.join(logdir, f"high_loss_samples_{rank}.jsonl")
             else:
@@ -300,8 +283,7 @@ def log_and_save_high_loss_samples(logdir, step, loss_dict, data, save_all=False
                         log_and_save_high_loss_samples.low_loss_count += 1
                         
                     g_info = group_data[idx]
-                    
-                    # Construct record
+
                     record = {
                         "step": step,
                         "type": s_type,
@@ -320,7 +302,6 @@ def log_and_save_high_loss_samples(logdir, step, loss_dict, data, save_all=False
                     if 'dtw_loss' in g_info:
                         record['dtw_loss'] = g_info['dtw_loss']
 
-                    # Save alignment indices
                     if 'forward_alignment_indices' in loss_dict:
                         # Forward: Main -> Ref (primary based on config)
                         fwd_align_idx = loss_dict['forward_alignment_indices'][idx].cpu().tolist()
@@ -331,31 +312,28 @@ def log_and_save_high_loss_samples(logdir, step, loss_dict, data, save_all=False
                         # Fallback for older code
                         align_idx = loss_dict['alignment_indices'][idx].cpu().tolist()
                         record["alignment_indices"] = align_idx
-                    
+
                     # Backward: Ref -> Main (primary based on config)
                     if 'backward_alignment_indices' in loss_dict:
                         bwd_align_idx = loss_dict['backward_alignment_indices'][idx].cpu().tolist()
                         record["backward_alignment_indices"] = bwd_align_idx
-                    
-                    # Save argmax indices (always available)
+
                     if 'forward_argmax_indices' in loss_dict:
                         fwd_argmax_idx = loss_dict['forward_argmax_indices'][idx].cpu().tolist()
                         record["forward_argmax_indices"] = fwd_argmax_idx
-                    
+
                     if 'backward_argmax_indices' in loss_dict:
                         bwd_argmax_idx = loss_dict['backward_argmax_indices'][idx].cpu().tolist()
                         record["backward_argmax_indices"] = bwd_argmax_idx
-                    
-                    # Save DTW indices (if computed)
+
                     if 'forward_dtw_indices' in loss_dict and loss_dict['forward_dtw_indices'] is not None:
                         fwd_dtw_idx = loss_dict['forward_dtw_indices'][idx].cpu().tolist()
                         record["forward_dtw_indices"] = fwd_dtw_idx
-                    
+
                     if 'backward_dtw_indices' in loss_dict and loss_dict['backward_dtw_indices'] is not None:
                         bwd_dtw_idx = loss_dict['backward_dtw_indices'][idx].cpu().tolist()
                         record["backward_dtw_indices"] = bwd_dtw_idx
-                    
-                    # Save top-5 alignment candidates and their probabilities
+
                     # Forward top-5: Main -> Ref (top 5 ref frames for each main frame)
                     if 'forward_top5_indices' in loss_dict:
                         fwd_top5_idx = loss_dict['forward_top5_indices'][idx].cpu().tolist()
@@ -376,16 +354,6 @@ def log_and_save_high_loss_samples(logdir, step, loss_dict, data, save_all=False
                         record['raw_sim12_batch_index'] = idx
                     
                     f.write(json.dumps(record) + "\n")
-            
-            # Print save confirmation
-            num_saved = len(indices_map)
-            # print(f"[Step {step}] Saved {num_saved} samples to {jsonl_file}")
-            
-            # Print breakdown by type
-            type_counts = {}
-            for s_type in indices_map.values():
-                type_counts[s_type] = type_counts.get(s_type, 0) + 1
-            # print(f"  Breakdown: {type_counts}")
 
 def setup_train_dir(logdir):
     """Setups directory for training."""
@@ -411,7 +379,6 @@ def get_cnn_feats(cnn, data, training, num_steps=None):
         else:
             num_steps = CONFIG.EVAL.NUM_FRAMES * CONFIG.DATA.NUM_STEPS
 
-    # Check for Qwen input
     if isinstance(data, dict) and 'qwen_input' in data:
         return cnn(data)
 

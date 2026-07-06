@@ -37,15 +37,13 @@ def convert(args):
         prefix = "base_model."
         
     print(f"Removing prefix: '{prefix}'")
-    
-    # Create new state dict for HF model
+
     hf_state_dict = {}
     for k, v in state_dict.items():
         if k.startswith(prefix):
             new_key = k[len(prefix):]
             hf_state_dict[new_key] = v
             
-    # Load empty HF model
     print(f"Loading empty config from {args.model_name_or_path}...")
     try:
         # Try Qwen3VL first
@@ -68,7 +66,6 @@ def convert(args):
         print(f"Error loading model config: {e}")
         return
 
-    # Load weights
     print("Loading weights into HF model...")
     missing, unexpected = model.load_state_dict(hf_state_dict, strict=False)
     
@@ -80,15 +77,13 @@ def convert(args):
     if len(unexpected) > 0:
         print(f"First 5 unexpected: {unexpected[:5]}")
 
-    # Save
     output_dir = args.output_dir
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-        
+
     print(f"Saving HF model to {output_dir}...")
     model.save_pretrained(output_dir)
-    
-    # Save processor
+
     try:
         print("Saving processor...")
         processor = AutoProcessor.from_pretrained(args.model_name_or_path, trust_remote_code=True)
