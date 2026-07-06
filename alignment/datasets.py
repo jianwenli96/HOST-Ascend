@@ -6,7 +6,6 @@ import os
 import json
 import glob
 import random
-import pickle
 import zlib
 import torch
 from torch.utils.data import Dataset, DataLoader, Sampler
@@ -414,7 +413,7 @@ class AlignmentCollator:
                     f for idx in chunk_indices
                     for f in orig_data['ref_frame_paths'][idx * c_size : (idx + 1) * c_size]]
 
-                # Logical paths (pickle mode logging)
+                # Logical paths (retained for downstream compatibility; unused, always None)
                 if orig_data.get('frame_paths_str') is not None:
                     chunk_data['frame_paths_str'] = [
                         f for idx in chunk_indices
@@ -879,82 +878,9 @@ class AlignmentDataset(Dataset):
         self.video_dataset_names = []
         self.video_weights = []
         self.video_dataset_types = []  # Store dataset type for each video (for path transforms)
-        
-        # Pickle data support
-        self.pickle_data = None
-        self.expert_data = None
-        self.pickle_path = None
-        self.expert_path = None
-        self.is_rollout_mode = False
-        self.rollout_images = None
-        self.rollout_wrist_images = None
-        self.task_descriptions = None
-        
-        # Check if input is pickle file
-        is_pickle = isinstance(video_paths_json, str) and video_paths_json.endswith('.pkl')
-        
-        if is_pickle:
-            # Load pickle data
-            import pickle
-            print(f"Loading video paths from pickle: {video_paths_json}")
-            self.pickle_path = video_paths_json  # Save for traceability
-            
-            with open(video_paths_json, 'rb') as f:
-                self.pickle_data = pickle.load(f)
-            
-            # Check if this is rollout mode (has 'rollout_batch' key)
-            self.is_rollout_mode = 'rollout_batch' in self.pickle_data
-            
-            if self.is_rollout_mode:
-                print(f"  Detected rollout mode pickle")
-                rb = self.pickle_data['rollout_batch']
-                self.task_descriptions = rb['task_descriptions']
-                num_videos = len(self.task_descriptions)
-                
-                # Reorganize images: (N_chunks, B, Chunk_size, H, W, 3) -> (B, Total_frames, H, W, 3)
-                full_imgs = rb['observation/full_image_list']
-                n_chunks, b_size, c_size = full_imgs.shape[:3]
-                self.rollout_images = full_imgs.permute(1, 0, 2, 3, 4, 5).reshape(b_size, n_chunks * c_size, *full_imgs.shape[3:])
-                
-                if 'observation/wrist_image' in rb:
-                    wrist_imgs = rb['observation/wrist_image']
-                    self.rollout_wrist_images = wrist_imgs.permute(1, 0, 2, 3, 4)
-                else:
-                    self.rollout_wrist_images = None
-                
-                # video_paths are task indices
-                self.video_paths = list(range(num_videos))
-                self.video_dataset_names = ["rollout_dataset"] * num_videos
-                self.video_weights = [1.0] * num_videos
-            else:
-                # Standard expert pickle mode: {task_name: {view: array}}
-                self.video_paths = sorted(list(self.pickle_data.keys()))
-                self.video_dataset_names = ["pickle_dataset"] * len(self.video_paths)
-                self.video_weights = [1.0] * len(self.video_paths)
-            
-            # Try to load corresponding expert data
-            pkl_dir = os.path.dirname(video_paths_json)
-            expert_candidates = [
-                os.path.join(pkl_dir, 'libero_10-expert-video.pkl'),
-                os.path.join(pkl_dir, os.path.basename(video_paths_json).replace('rollout', 'expert')),
-                os.path.join(pkl_dir, 'expert.pkl'),
-            ]
-            
-            for expert_path in expert_candidates:
-                if os.path.exists(expert_path):
-                    print(f"  Loading expert data from: {expert_path}")
-                    self.expert_path = expert_path
-                    with open(expert_path, 'rb') as f:
-                        self.expert_data = pickle.load(f)
-                    break
-            
-            if self.expert_data is None:
-                print(f"  Warning: No expert data found. Will use rollout data as both query and reference.")
-            
-            print(f"  Loaded {len(self.video_paths)} videos from pickle file")
-        
+
         # 1. Try loading from provided argument (supporting list/comma-separated)
-        elif video_paths_json:
+        if video_paths_json:
             if isinstance(video_paths_json, str):
                 paths = [p.strip() for p in video_paths_json.split(',')]
             elif isinstance(video_paths_json, list):
@@ -1073,8 +999,7 @@ class AlignmentDataset(Dataset):
                     f"is missing or not a directory"
                 )
 
-        dataset_type = "pickle" if is_pickle else "json"
-        print(f"AlignmentDataset initialized with {len(self.video_paths)} videos and views: {self.views} (source: {dataset_type})")
+        print(f"AlignmentDataset initialized with {len(self.video_paths)} videos and views: {self.views}")
         
     def __len__(self):
         return len(self.video_paths) * len(self.views)
@@ -1458,10 +1383,7 @@ class AlignmentDataset(Dataset):
         return np.concatenate(context_steps)
 
     def _context_steps_to_paths(self, context_steps, files):
-        """Convert flat context_steps array to a list of file paths (or numpy frames).
-
-        Works for both filesystem paths (str/Path) and numpy/tensor arrays (pickle mode).
-        """
+        """Convert flat context_steps array to a list of file paths."""
         return [files[i] for i in context_steps]
 
     def _resolve_joint_mapping(self, dataset_name, video_dir):
@@ -1774,94 +1696,6 @@ class AlignmentDataset(Dataset):
             path_lists.append([self._replace_view_in_path(p, v0, v) for p in paths_primary])
         return self._interleave_n_views(path_lists, num_ctx), ordered_views
 
-    def _load_video_data_from_pickle(self, video_idx):
-        """
-        Stage 1: Data Loading from Pickle.
-        Returns a dict with main_files, ref_files, align_files, instructions, etc.
-        
-        Supports two pickle formats:
-        1. Rollout mode: {rollout_batch: {observation/full_image_list, task_descriptions, ...}}
-        2. Standard mode: {task_name: {view: numpy_array}}
-        """
-        dataset_name = self.video_dataset_names[video_idx] if video_idx < len(self.video_dataset_names) else "pickle_dataset"
-        view = 'images'
-        
-        if self.is_rollout_mode:
-            # Rollout mode: video_paths[video_idx] is an integer index
-            video_idx_int = self.video_paths[video_idx]
-            task_name = self.task_descriptions[video_idx_int]
-            
-            # Main files: rollout images for this video index
-            main_files = self.rollout_images[video_idx_int]  # (Total_frames, H, W, 3)
-            
-            # Reference files: expert data for this task
-            if self.expert_data is not None and task_name in self.expert_data:
-                if view in self.expert_data[task_name]:
-                    ref_files = self.expert_data[task_name][view]
-                else:
-                    ref_files = main_files
-            else:
-                ref_files = main_files
-            
-            # Use task name as video_path for logical paths
-            video_path = task_name
-            ref_video_path = task_name
-            align_video_path = task_name
-            instruction = task_name
-            ref_instruction = task_name
-        else:
-            # Standard expert pickle mode: {task_name: {view: array}}
-            video_path = self.video_paths[video_idx]
-            
-            try:
-                task_data = self.pickle_data[video_path]
-                if isinstance(task_data, dict) and view in task_data:
-                    main_files = task_data[view]
-                else:
-                    return None
-            except (KeyError, TypeError) as e:
-                print(f"Error accessing pickle_data[{video_path}]: {e}")
-                return None
-            
-            # Reference from expert_data
-            if self.expert_data is not None and video_path in self.expert_data:
-                expert_task_data = self.expert_data[video_path]
-                if isinstance(expert_task_data, dict) and view in expert_task_data:
-                    ref_files = expert_task_data[view]
-                else:
-                    ref_files = main_files
-            else:
-                ref_files = main_files
-            
-            ref_video_path = video_path
-            align_video_path = video_path
-            instruction = video_path
-            ref_instruction = video_path
-        
-        # Align files: use reference files
-        align_files = ref_files
-        
-        # Initial frames: store as logical path with pickle file path for traceability
-        initial_frame_path = f"{self.pickle_path}:{video_path}/{view}/frame_0"
-        ref_source = self.expert_path if self.expert_path else self.pickle_path
-        ref_initial_frame_path = f"{ref_source}:{ref_video_path}/{view}/frame_0"
-        
-        return {
-            'video_path': video_path,
-            'dataset_name': dataset_name,
-            'view': view,
-            'main_files': main_files,
-            'ref_video_path': video_path,  # In pickle mode, ref is from expert of same task
-            'ref_files': ref_files,
-            'align_video_path': video_path,
-            'align_files': align_files,
-            'instruction': instruction,
-            'ref_instruction': ref_instruction,
-            'initial_frame_path': initial_frame_path,
-            'ref_initial_frame_path': ref_initial_frame_path
-        }
-
-
     def _load_video_data_from_json(self, video_idx):
         """
         Stage 1: Data Loading from JSON/filesystem.
@@ -2011,12 +1845,7 @@ class AlignmentDataset(Dataset):
         video_idx = index // len(self.views)
         
         # ==================== STAGE 1: Data Loading ====================
-        if self.pickle_data is not None:
-            # Load from pickle
-            loaded_data = self._load_video_data_from_pickle(video_idx)
-        else:
-            # Load from JSON/filesystem
-            loaded_data = self._load_video_data_from_json(video_idx)
+        loaded_data = self._load_video_data_from_json(video_idx)
         
         if loaded_data is None:
             # Retry with random index
@@ -2028,8 +1857,6 @@ class AlignmentDataset(Dataset):
         main_files = loaded_data['main_files']
         ref_video_path = loaded_data['ref_video_path']
         ref_files = loaded_data['ref_files']
-        align_video_path = loaded_data['align_video_path']
-        align_files = loaded_data['align_files']
         instruction = loaded_data['instruction']
         ref_instruction = loaded_data['ref_instruction']
         initial_frame_path = loaded_data['initial_frame_path']
@@ -2064,11 +1891,10 @@ class AlignmentDataset(Dataset):
         main_steps = self._sample_steps(len(main_files), num_steps)
         ref_steps = self._sample_steps(len(ref_files), num_steps)
 
-        # Joint state loading (no-op when USE_JOINTS=False or pickle mode)
+        # Joint state loading (no-op when USE_JOINTS=False)
         main_joint_per_step = None
         ref_joint_per_step = None
-        is_pickle_mode = self.pickle_data is not None
-        if getattr(CONFIG.JOINTS, 'USE_JOINTS', False) and not is_pickle_mode:
+        if getattr(CONFIG.JOINTS, 'USE_JOINTS', False):
             _vi = loaded_data.get('video_info')
             _ref_vi = loaded_data.get('ref_video_info')
             if _vi is not None:
@@ -2123,86 +1949,43 @@ class AlignmentDataset(Dataset):
         ref_context_steps = self._get_context_steps(ref_steps, len(ref_files), ref_video_path, num_context=num_ctx)
         
         # Construct frame_paths
-        # For Collator: pass actual data (numpy/tensor) or file paths
-        # For logging: store logical paths separately
-        is_pickle_mode = isinstance(main_files, (np.ndarray, torch.Tensor))
         view = loaded_data['view']
-        
-        if is_pickle_mode:
-            # Pickle mode: pass numpy arrays directly to Collator
-            main_frame_paths = []
-            main_frame_paths_logical = []  # For JSON logging
-            for i in main_context_steps:
-                # Pass actual numpy array for Collator
-                main_frame_paths.append(main_files[i])
-                # Store logical path for JSON logging
-                main_frame_paths_logical.append(f"{self.pickle_path}:{video_path}/{view}/frame_{i}")
-            
-            # Ref uses expert_path if available
-            ref_source_path = self.expert_path if self.expert_path else self.pickle_path
-            
-            final_ref_paths = []
-            final_ref_paths_logical = []
-            for i in ref_context_steps:
-                final_ref_paths.append(ref_files[i])
-                final_ref_paths_logical.append(f"{ref_source_path}:{ref_video_path}/{view}/frame_{i}")
-            
-            # Align paths: combine main (first half) + ref (second half).
-            # No multi-view in pickle mode; num_align frames per segment → 2*num_align total.
-            main_align_idxs = np.linspace(0, len(main_files) - 1, num_align, dtype=int)
-            ref_align_idxs  = np.linspace(0, len(align_files) - 1, num_align, dtype=int)
-            align_frame_paths_list = (
-                [main_files[k] for k in main_align_idxs] +
-                [align_files[k] for k in ref_align_idxs]
-            )
-            align_frame_paths_logical = (
-                [f"{self.pickle_path}:{video_path}/{view}/frame_{k}" for k in main_align_idxs] +
-                [f"{ref_source_path}:{align_video_path}/{view}/frame_{k}" for k in ref_align_idxs]
-            )
-            main_align_frame_paths_list    = align_frame_paths_list
-            main_align_frame_paths_logical = align_frame_paths_logical
-            num_align_frames_total = len(align_frame_paths_list)  # 2 * num_align
-        else:
-            # JSON mode: file paths serve both purposes.
-            # num_views and cam_list_ld already set above from loaded_data['cam_list'].
-            ref_view = loaded_data.get('ref_view', view)
 
-            # Main paths
-            main_frame_paths = self._context_steps_to_paths(main_context_steps, main_files)
-            if num_views > 1 and cam_list_ld:
-                main_frame_paths, _ = self._apply_multiview_n_views(
-                    main_frame_paths, view, cam_list_ld, num_ctx)
-            main_frame_paths_logical = main_frame_paths
+        # num_views and cam_list_ld already set above from loaded_data['cam_list'].
+        ref_view = loaded_data.get('ref_view', view)
 
-            # Ref paths
-            final_ref_paths = self._context_steps_to_paths(ref_context_steps, ref_files)
-            if num_views > 1 and cam_list_ld:
-                final_ref_paths, _ = self._apply_multiview_n_views(
-                    final_ref_paths, ref_view, cam_list_ld, num_ctx)
-            final_ref_paths_logical = final_ref_paths
+        # Main paths
+        main_frame_paths = self._context_steps_to_paths(main_context_steps, main_files)
+        if num_views > 1 and cam_list_ld:
+            main_frame_paths, _ = self._apply_multiview_n_views(
+                main_frame_paths, view, cam_list_ld, num_ctx)
 
-            # Build combined align: main (first half) + ref (second half).
-            # Single-view: align_half = num_align per segment → 2*num_align total.
-            # N-view:      align_half = num_align // num_views temporal positions per segment,
-            #              then ×num_views views → num_align slots per segment → 2*num_align total.
-            align_half = num_align // num_views
+        # Ref paths
+        final_ref_paths = self._context_steps_to_paths(ref_context_steps, ref_files)
+        if num_views > 1 and cam_list_ld:
+            final_ref_paths, _ = self._apply_multiview_n_views(
+                final_ref_paths, ref_view, cam_list_ld, num_ctx)
 
-            main_align_idxs = get_stratified_idxs(len(main_files), align_half, mode=self.mode)
-            ref_align_idxs  = get_stratified_idxs(len(ref_files), align_half, mode=self.mode)
-            main_align_paths = [main_files[k] for k in main_align_idxs]
-            ref_align_paths  = [ref_files[k]  for k in ref_align_idxs]
-            if num_views > 1 and cam_list_ld:
-                # n=1: frame-level interleave [v1_t0, v2_t0, ..., vN_t0, v1_t1, ...]
-                main_align_paths, _ = self._apply_multiview_n_views(
-                    main_align_paths, view, cam_list_ld, num_ctx=1)
-                ref_align_paths, _  = self._apply_multiview_n_views(
-                    ref_align_paths, ref_view, cam_list_ld, num_ctx=1)
-            align_frame_paths_list     = main_align_paths + ref_align_paths
-            align_frame_paths_logical  = align_frame_paths_list
-            main_align_frame_paths_list    = align_frame_paths_list
-            main_align_frame_paths_logical = align_frame_paths_list
-            num_align_frames_total = len(align_frame_paths_list)
-        
+        # Build combined align: main (first half) + ref (second half).
+        # Single-view: align_half = num_align per segment → 2*num_align total.
+        # N-view:      align_half = num_align // num_views temporal positions per segment,
+        #              then ×num_views views → num_align slots per segment → 2*num_align total.
+        align_half = num_align // num_views
+
+        main_align_idxs = get_stratified_idxs(len(main_files), align_half, mode=self.mode)
+        ref_align_idxs  = get_stratified_idxs(len(ref_files), align_half, mode=self.mode)
+        main_align_paths = [main_files[k] for k in main_align_idxs]
+        ref_align_paths  = [ref_files[k]  for k in ref_align_idxs]
+        if num_views > 1 and cam_list_ld:
+            # n=1: frame-level interleave [v1_t0, v2_t0, ..., vN_t0, v1_t1, ...]
+            main_align_paths, _ = self._apply_multiview_n_views(
+                main_align_paths, view, cam_list_ld, num_ctx=1)
+            ref_align_paths, _  = self._apply_multiview_n_views(
+                ref_align_paths, ref_view, cam_list_ld, num_ctx=1)
+        align_frame_paths_list     = main_align_paths + ref_align_paths
+        main_align_frame_paths_list    = align_frame_paths_list
+        num_align_frames_total = len(align_frame_paths_list)
+
         # Construct Output
         data = {
             'chosen_steps': torch.from_numpy(main_steps),
@@ -2222,11 +2005,10 @@ class AlignmentDataset(Dataset):
             'ref_instruction': ref_instruction,
             'dataset_name': dataset_name,
             'ref_initial_frame_path': ref_initial_frame_path,
-            # Add logical paths for JSON logging (only in pickle mode)
-            'frame_paths_str': main_frame_paths_logical if is_pickle_mode else None,
-            'ref_frame_paths_str': final_ref_paths_logical if is_pickle_mode else None,
-            'align_frame_paths_str': align_frame_paths_logical if is_pickle_mode else None,
-            'main_align_frame_paths_str': main_align_frame_paths_logical if is_pickle_mode else None,
+            'frame_paths_str': None,
+            'ref_frame_paths_str': None,
+            'align_frame_paths_str': None,
+            'main_align_frame_paths_str': None,
             'main_joint_per_step': main_joint_per_step,
             'ref_joint_per_step':  ref_joint_per_step,
         }
@@ -2249,12 +2031,7 @@ class AlignmentDataset(Dataset):
                 is_ignore_sample = isinstance(e, IgnoreSample)
 
                 if not is_too_short_error and not is_ignore_sample:
-                    # Add task description for rollout mode
-                    if self.is_rollout_mode and hasattr(self, 'task_descriptions'):
-                        task_name = self.task_descriptions[video_path] if video_path < len(self.task_descriptions) else "Unknown"
-                        print(f"Error loading index {index} (video_idx={video_idx}, task='{task_name}'): {e}. Retrying with random index...")
-                    else:
-                        print(f"Error loading index {index} (video_idx={video_idx}, path='{video_path}'): {e}. Retrying with random index...")
+                    print(f"Error loading index {index} (video_idx={video_idx}, path='{video_path}'): {e}. Retrying with random index...")
                 
                 index = random.randint(0, len(self) - 1)
 
