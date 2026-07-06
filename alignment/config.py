@@ -19,7 +19,6 @@ CONFIG.IMAGE_SIZE = 224
 # Training params
 # ******************************************************************************
 
-# Number of training steps.
 CONFIG.TRAIN = edict()
 # Number of frames to use while training.
 CONFIG.TRAIN.NUM_FRAMES = 24

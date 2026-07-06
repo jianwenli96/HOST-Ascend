@@ -11,38 +11,6 @@ if [ -n "${CONDA_PREFIX:-}" ] && [ -x "${CONDA_PREFIX}/bin/nvcc" ]; then
   export CUDAToolkit_ROOT="${CONDA_PREFIX}"
 fi
 
-# --- Auto-link logs to checkpoint storage ---
-PROJECT_NAME=$(basename "$PWD")
-TARGET_BASE="/mnt/data/checkpoint/ethanchen/code"
-TARGET_PROJECT_DIR="$TARGET_BASE/$PROJECT_NAME"
-TARGET_LOGS="$TARGET_PROJECT_DIR/logs"
-LOCAL_LOGS="./logs"
-
-
-# Ensure target project directory exists
-# if [ ! -d "$TARGET_PROJECT_DIR" ]; then
-#     mkdir -p "$TARGET_PROJECT_DIR"
-# fi
-
-# # Handle logs directory
-# if [ -d "$LOCAL_LOGS" ] && [ ! -L "$LOCAL_LOGS" ]; then
-#     echo "Detected local 'logs' directory. Moving to checkpoint storage ($TARGET_LOGS)..."
-#     if [ ! -d "$TARGET_LOGS" ]; then
-#         mv "$LOCAL_LOGS" "$TARGET_LOGS"
-#     else
-#         echo "Target $TARGET_LOGS already exists. Merging contents..."
-#         # Move contents, ignore errors if files exist
-#         mv "$LOCAL_LOGS"/* "$TARGET_LOGS"/ 2>/dev/null || true
-#         rm -rf "$LOCAL_LOGS"
-#     fi
-#     ln -s "$TARGET_LOGS" "$LOCAL_LOGS"
-# elif [ ! -e "$LOCAL_LOGS" ]; then
-#     echo "Creating 'logs' symlink pointing to $TARGET_LOGS..."
-#     mkdir -p "$TARGET_LOGS"
-#     ln -s "$TARGET_LOGS" "$LOCAL_LOGS"
-# fi
-# --------------------------------------------
-
 # Set your own key in the environment before launching: export WANDB_API_KEY=...
 export WANDB_API_KEY="${WANDB_API_KEY:-}"
 # If no wandb key is available (e.g. a fresh open-source checkout), fall back to
@@ -95,8 +63,6 @@ RANK=${RANK:-0}
 # Define arguments
 NETWORK="Qwen3-VL-Embedding-8B"
 VIDEO_PATHS="/open_data/cgy/processed_data/video_paths_basket/clean/10042_video_paths.json"
-# VIDEO_PATHS="/open_data/cgy/processed_data/video_paths_basket/clean/rt1_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/fmb_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/SSv2_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/bridgev2_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/calvin_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/libero_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/maniskill_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/droid_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/clean/robocoin_video_paths.json"
-# VIDEO_PATHS="/open_data/cgy/processed_data/video_paths_basket/libero_video_paths.json,/open_data/cgy/processed_data/video_paths_basket/berkeley_autolab_ur5_video_paths.json"
 DS_CONFIG="scripts/ds_config_zero3.json"
 # To resume from a previous run, set: RESUME_DIR="/path/to/previous/run/logs/tcc_qwen_alignment_<timestamp>"
 
@@ -112,7 +78,6 @@ echo "Setting Gradient Accumulation Steps to: $GRAD_ACCUM_STEPS (World Size: $WO
 LOGDIR="logs/$WANDB_PROJECT"
 SAVE_INTERVAL=500
 MAX_ITERS=3000
-# NUM_ALIGN_FRAMES=24
 ARGS="--alsologtostderr --logdir $LOGDIR --network $NETWORK --video_paths $VIDEO_PATHS --gradient_accumulation_steps $GRAD_ACCUM_STEPS --ds_config $DS_CONFIG --save_interval $SAVE_INTERVAL --max_iters $MAX_ITERS"
 
 if [ ! -z "$RESUME_DIR" ]; then
