@@ -24,13 +24,15 @@ Skill Transfer)** 中负责从耦合的视觉示范中恢复执行的机制：�
 
 ```text
 policy_training/
+├── environment.yml           # 完整的 HOST_Policy Conda 环境
+├── pyproject.toml            # Python 可编辑安装配置
 ├── configs/
 │   ├── data/                 # 数据集配置（data_path、cam_mapping_dir、joint_action_mapping_dir 等）
 │   ├── model/                # 模型架构配置（self_grounded_predictor_joint*.yaml）
 │   └── task/                 # 任务级配置（组合 data + model 配置，设置训练超参）
 ├── scripts/
 │   ├── train.py
-│   ├── train_zero1_real_pac_headwise_ncp_ve.sh  # Deepspeed ZeRO-1 训练入口（已验证）
+│   ├── run_train.sh                             # DeepSpeed ZeRO-1 训练入口
 │   ├── eval_openloop.sh                          # 真机开环评测入口
 │   ├── preprocess_action_dit_backbone.py         # 训练前预处理 ActionDiT backbone
 │   └── precompute_text_embeds.py                 # 训练前预计算 T5 文本 embedding 缓存
@@ -47,16 +49,15 @@ policy_training/
 ## 环境配置
 
 ```bash
-conda create -n self_grounded_prediction python=3.10 -y
-conda activate self_grounded_prediction
-pip install -U pip
-pip install torch==2.7.1+cu128 torchvision==0.22.1+cu128 --extra-index-url https://download.pytorch.org/whl/cu128
-pip install -e .
+conda env create -f environment.yml
+conda activate HOST_Policy
+pip install -e . --no-deps
 ```
 
-安装后即可以 `self_grounded_prediction` 包名导入。注意仓库内实际的训练/评测脚本并不依赖这次
-pip 安装 —— `scripts/_ensure_project_src.py` 会直接把 `src/` 加入 `sys.path`；只有当你想从本目录
-之外 `import self_grounded_prediction` 时才需要 `pip install -e .`。
+`environment.yml` 从本地已验证的 `lingbot` 环境导出，并在本仓库中重命名为
+`HOST_Policy`。Python 包名仍为 `self_grounded_prediction`，环境名与包名有意区分。
+仓库内训练/评测脚本也会通过 `scripts/_ensure_project_src.py` 直接将 `src/` 加入
+`sys.path`。
 
 ## 模型准备
 
@@ -113,7 +114,7 @@ torchrun --standalone --nproc_per_node=8 scripts/precompute_text_embeds.py task=
 指向该文件。
 
 ```bash
-bash scripts/train_zero1_real_pac_headwise_ncp_ve.sh
+bash scripts/run_train.sh
 ```
 
 这是已验证的生产训练入口 —— 它组合了
@@ -134,8 +135,8 @@ bash scripts/eval_openloop.sh
 Checkpoint 和 dataset-stats 路径在脚本内设置；视觉编码器
 （`configs/model/*.yaml` 中的 `visual_encoder.backbone_local_repo`/`backbone_weights_path`/
 `siglip_local_weights_path`）目前默认指向内部权重路径，并在这些字段为空时自动回退到公开下载
-（通过 `torch.hub` 下载 `facebookresearch/dinov2`，通过 TIMM 下载 SigLIP）—— 内部路径配置化的
-当前进度见仓库根目录的 `OPEN_SOURCE_PATH_TODOS.md`。
+（通过 `torch.hub` 下载 `facebookresearch/dinov2`，通过 TIMM 下载 SigLIP）。请将这些字段设置为
+本机可访问的路径，或将其清空以使用公开模型回退。
 
 ## 致谢
 
@@ -148,8 +149,9 @@ Checkpoint 和 dataset-stats 路径在脚本内设置；视觉编码器
 如果我们的工作对你有帮助，欢迎引用：
 
 ```bibtex
-@article{host2026,
-  title={HOST: Human-to-robot One-shot Skill Transfer},
-  % TODO: 待补充作者、发表信息、年份、DOI/arXiv
+@article{chen2026host,
+  title   = {Robots acquire manipulation skills in seconds from a single human video},
+  author  = {Chen, Guangyan and Wang, Meiling and Cui, Te and Zhou, Zichen and others},
+  year    = {2026}
 }
 ```

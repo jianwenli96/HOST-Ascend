@@ -4,6 +4,15 @@ set -e
 # Ensure we are in the project root directory
 cd "$(dirname "$0")/.."
 
+NETWORK="${NETWORK:-Qwen3-VL-Embedding-8B}"
+VIDEO_PATHS="${VIDEO_PATHS:-}"
+
+if [ -z "${VIDEO_PATHS}" ]; then
+    echo "ERROR: set VIDEO_PATHS to your episode-list JSON before launching." >&2
+    echo "Example: VIDEO_PATHS=/path/to/video_paths.json bash train_scripts/run_ds.sh" >&2
+    exit 1
+fi
+
 if [ -n "${CONDA_PREFIX:-}" ] && [ -x "${CONDA_PREFIX}/bin/nvcc" ]; then
   unset CUDA_HOME CUDA_PATH CUDAToolkit_ROOT
   export CUDA_HOME="${CONDA_PREFIX}"
@@ -19,7 +28,7 @@ if [ -z "${WANDB_API_KEY}" ]; then
     echo "[wandb] WARNING: WANDB_API_KEY is empty -> exporting WANDB_MODE=offline (local logging only). Set WANDB_API_KEY to enable cloud sync." >&2
     export WANDB_MODE="${WANDB_MODE:-offline}"
 fi
-BASE_PROJECT_NAME="tcc_qwen_alignment_10042"
+BASE_PROJECT_NAME="host_alignment"
 
 # Synchronization logic for timestamp
 # Assuming RANK is provided by environment (e.g. SLURM_NODEID) or defaults to 0
@@ -61,8 +70,6 @@ WORLD_SIZE=${WORLD_SIZE:-1}
 RANK=${RANK:-0}
 
 # Define arguments
-NETWORK="Qwen3-VL-Embedding-8B"
-VIDEO_PATHS="/open_data/cgy/processed_data/video_paths_basket/clean/10042_video_paths.json"
 DS_CONFIG="scripts/ds_config_zero3.json"
 # To resume from a previous run, set: RESUME_DIR="/path/to/previous/run/logs/tcc_qwen_alignment_<timestamp>"
 
@@ -89,10 +96,8 @@ if [ ! -z "$PRETRAIN_WEIGHTS" ]; then
 fi
 
 mkdir -p "$LOGDIR"
-chown -R 2103:2103 "$LOGDIR"
 
 # Launch with torchrun
 CMD="torchrun --nproc_per_node=$NUM_GPUS --nnodes=$WORLD_SIZE --node_rank=$RANK --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT train.py $ARGS"
 echo "Running: $CMD"
 $CMD
-

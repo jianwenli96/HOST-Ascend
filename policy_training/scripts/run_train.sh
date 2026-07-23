@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Train SelfGroundedPredictor with visual encoder + noisy clean progress token (pac_headwise + ncp + DINOv2)
-# Usage: bash scripts/train_zero1_real_pac_headwise_ncp_ve.sh [hydra_overrides...]
+# Usage: bash scripts/run_train.sh [hydra_overrides...]
 
 set -euo pipefail
 

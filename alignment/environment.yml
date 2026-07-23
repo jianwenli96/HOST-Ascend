@@ -1,4 +1,4 @@
-name: emu_vla_rl
+name: HOST_Alignment
 channels:
   - conda-forge
   - nvidia
@@ -14,10 +14,10 @@ dependencies:
   - brotli-python=1.2.0
   - bzip2=1.0.8
   - c-ares=1.34.6
-  - ca-certificates=2025.11.12
+  - ca-certificates=2026.1.4
   - cached-property=1.5.2
   - cached_property=1.5.2
-  - certifi=2025.11.12
+  - certifi=2026.1.4
   - charset-normalizer=3.4.4
   - conda-pack=0.8.1
   - cuda-cccl_linux-64=12.9.27
@@ -95,6 +95,7 @@ dependencies:
   - keyutils=1.6.3
   - krb5=1.21.3
   - ld_impl_linux-64=2.45
+  - lerc=4.0.0
   - libabseil=20250512.1
   - libaec=1.1.4
   - libblas=3.11.0
@@ -120,6 +121,7 @@ dependencies:
   - libcusparse=12.5.10.65
   - libcusparse-dev=12.5.10.65
   - libcusparse-static=12.5.10.65
+  - libdeflate=1.25
   - libedit=3.1.20250104
   - libev=4.33
   - libexpat=2.7.3
@@ -167,7 +169,10 @@ dependencies:
   - libstdcxx-ng=15.2.0
   - libtensorflow_cc=2.19.1
   - libtensorflow_framework=2.19.1
+  - libtiff=4.7.1
   - libuuid=2.41.2
+  - libwebp=1.6.0
+  - libwebp-base=1.6.0
   - libxcb=1.17.0
   - libxcrypt=4.4.36
   - libxkbcommon=1.13.1
@@ -186,7 +191,7 @@ dependencies:
   - nss=3.118
   - ocl-icd=2.3.3
   - opencl-headers=2025.06.13
-  - openssl=3.6.0
+  - openssl=3.6.1
   - opt_einsum=3.4.0
   - optree=0.18.0
   - packaging=25.0
@@ -244,10 +249,12 @@ dependencies:
       - cycler==0.12.1
       - datasets==4.4.2
       - decorator==5.2.1
+      - decord==0.6.0
       - deepspeed==0.14.4
       - dill==0.4.0
       - dm-tree==0.1.9
       - docstring-parser==0.17.0
+      - dtaidistance==2.3.13
       - easydict==1.13
       - einops==0.8.1
       - etils==1.13.0
@@ -302,6 +309,7 @@ dependencies:
       - markupsafe==2.1.5
       - matplotlib==3.10.7
       - matplotlib-inline==0.2.1
+      - maturin==1.11.5
       - mdit-py-plugins==0.5.0
       - ml-dtypes==0.2.0
       - moviepy==2.2.1
@@ -384,7 +392,7 @@ dependencies:
       - stack-data==0.6.3
       - starlette==0.50.0
       - sympy==1.14.0
-      - tensorboard==2.15.2
+      - tensorboard==2.20.0
       - tensorboard-data-server==0.7.2
       - tiktoken==0.6.0
       - tokenizers==0.22.1
@@ -406,6 +414,7 @@ dependencies:
       - tzdata==2025.2
       - ujson==5.11.0
       - uvicorn==0.38.0
+      - video-reader-rs==0.4.2
       - wandb==0.23.1
       - wcwidth==0.2.14
       - websockets==12.0

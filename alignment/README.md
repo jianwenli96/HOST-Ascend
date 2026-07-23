@@ -30,7 +30,7 @@ alignment/
 ├── algos/                     # Alignment / Algorithm module-level wrappers
 ├── monkey_patch_forward.py    # Qwen3-VL packed-sequence attention/position-id patches
 ├── train_scripts/
-│   └── run_ds_10042.sh        # Deepspeed training entrypoint (verified path)
+│   └── run_ds.sh              # DeepSpeed training entrypoint
 └── scripts/                   # Checkpoint conversion utilities
 ```
 
@@ -38,7 +38,7 @@ alignment/
 
 ```bash
 conda env create -f environment.yml
-conda activate emu_vla_rl
+conda activate HOST_Alignment
 ```
 
 `environment.yml` is a full conda environment export; if you'd rather build one incrementally,
@@ -50,10 +50,8 @@ image/video processor stack.
 `alignment/` and `policy_training/` consume the same on-disk data convention — see
 [`data_preprocessing/README.md`](../data_preprocessing/README.md) at the repo root for the full,
 single-source-of-truth schema (video-paths list, episode directory layout, camera mapping,
-joint/action normalization) and the task-grouping scripts that build `task_paths.json`. The
-shipped script points at this team's internal cluster paths
-(`--video_paths /open_data/cgy/processed_data/video_paths_basket/clean/10042_video_paths.json`) —
-replace it with your own data in that format.
+joint/action normalization) and the task-grouping scripts that build `task_paths.json`. Pass your
+own episode-list JSON through the `VIDEO_PATHS` environment variable when launching `run_ds.sh`.
 
 `alignment/` specifically needs only video frames plus task grouping (`task_paths.json`) — no
 robot actions/joint data are required unless you enable joint conditioning
@@ -78,7 +76,7 @@ CONFIG.JOINTS.USE_JOINTS = False     # set True + JOINT_ACTION_MAPPING_DIR to co
 ## Training
 
 ```bash
-bash train_scripts/run_ds_10042.sh
+VIDEO_PATHS=/path/to/video_paths.json bash train_scripts/run_ds.sh
 ```
 
 This wraps `train.py` with `torchrun` + DeepSpeed ZeRO-3. Key flags (see `train.py --help` for the

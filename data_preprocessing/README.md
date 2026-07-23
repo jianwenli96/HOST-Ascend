@@ -47,9 +47,9 @@ protocol used for `policy_training/`/`alignment/`.
 `policy_training/` (self-grounded prediction) and `alignment/` (target coupling) consume the
 **same on-disk data convention**: a JSON list of episode directory paths, each episode directory
 following a shared layout, plus two shared sidecar mapping files (camera views, joint/action
-normalization). This is the single source of truth for that format; both modules' shipped configs
-(`policy_training/configs/data/custom*.yaml`, `alignment/train_scripts/run_ds_10042.sh`) point at
-this team's internal cluster paths — replace them with your own data in this format.
+normalization). This is the single source of truth for that format. Pass the episode-list JSON to
+`alignment/train_scripts/run_ds.sh` through `VIDEO_PATHS`, and set the corresponding fields in
+`policy_training/configs/data/custom*.yaml`.
 
 Per-module differences are called out inline and summarized in [§2.6](#26-per-module-differences).
 

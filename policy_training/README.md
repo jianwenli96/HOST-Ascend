@@ -26,13 +26,15 @@ video/action experts (a Mixture-of-Transformers architecture) built on top of th
 
 ```text
 policy_training/
+├── environment.yml           # Complete HOST_Policy Conda environment
+├── pyproject.toml            # Editable Python package metadata
 ├── configs/
 │   ├── data/                 # Dataset configs (data_path, cam_mapping_dir, joint_action_mapping_dir, ...)
 │   ├── model/                # Model architecture configs (self_grounded_predictor_joint*.yaml)
 │   └── task/                 # Task-level configs (composes a data + model config, sets training hparams)
 ├── scripts/
 │   ├── train.py
-│   ├── train_zero1_real_pac_headwise_ncp_ve.sh  # Deepspeed ZeRO-1 training entrypoint (verified path)
+│   ├── run_train.sh                              # DeepSpeed ZeRO-1 training entrypoint
 │   ├── eval_openloop.sh                          # Real-robot open-loop evaluation entrypoint
 │   ├── preprocess_action_dit_backbone.py         # Preprocess ActionDiT backbone before training
 │   └── precompute_text_embeds.py                 # Precompute T5 text embedding cache before training
@@ -49,17 +51,16 @@ policy_training/
 ## Environment Setup
 
 ```bash
-conda create -n self_grounded_prediction python=3.10 -y
-conda activate self_grounded_prediction
-pip install -U pip
-pip install torch==2.7.1+cu128 torchvision==0.22.1+cu128 --extra-index-url https://download.pytorch.org/whl/cu128
-pip install -e .
+conda env create -f environment.yml
+conda activate HOST_Policy
+pip install -e . --no-deps
 ```
 
-The package is importable as `self_grounded_prediction` after this step. Note that the actual
-training/eval scripts in this repo don't rely on the pip install — `scripts/_ensure_project_src.py`
-puts `src/` on `sys.path` directly, so `pip install -e .` is only needed if you want to `import
-self_grounded_prediction` from outside this directory.
+`environment.yml` is exported from the verified local `lingbot` environment and renamed
+`HOST_Policy` for this repository. The Python package remains importable as
+`self_grounded_prediction`; the environment name and package name are intentionally different.
+The training/evaluation scripts also place `src/` on `sys.path` directly through
+`scripts/_ensure_project_src.py`.
 
 ## Model Preparation
 
@@ -118,7 +119,7 @@ in the run directory (`runs/{task_name}/{run_id}/dataset_stats.json`); point `pr
 at that file for subsequent runs.
 
 ```bash
-bash scripts/train_zero1_real_pac_headwise_ncp_ve.sh
+bash scripts/run_train.sh
 ```
 
 This is the verified production entrypoint — it composes
@@ -141,8 +142,8 @@ Checkpoint and dataset-stats paths are set inside the script; the visual encoder
 (`configs/model/*.yaml`'s `visual_encoder.backbone_local_repo`/`backbone_weights_path`/
 `siglip_local_weights_path`) currently defaults to internal weight paths with an automatic
 fallback to public downloads (`facebookresearch/dinov2` via `torch.hub`, TIMM for SigLIP) when
-those fields are unset — see `OPEN_SOURCE_PATH_TODOS.md` at the repo root for the current status of
-making every internal path configurable.
+those fields are unset. Set these fields to paths available on your system, or unset them to use
+the public-model fallbacks.
 
 ## Acknowledgements
 
@@ -155,8 +156,9 @@ This module's codebase is built on top of
 If you find our work helpful, please consider citing:
 
 ```bibtex
-@article{host2026,
-  title={HOST: Human-to-robot One-shot Skill Transfer},
-  % TODO: fill in authors, venue, year, DOI/arXiv once available
+@article{chen2026host,
+  title   = {Robots acquire manipulation skills in seconds from a single human video},
+  author  = {Chen, Guangyan and Wang, Meiling and Cui, Te and Zhou, Zichen and others},
+  year    = {2026}
 }
 ```
