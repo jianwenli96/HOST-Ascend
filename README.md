@@ -1,4 +1,8 @@
-# Robots Acquire Manipulation Skills in Seconds from a Single Human Video
+<p align="center">
+  <img src="assets/host_icon_v2.png" width="200" alt="HOST method icon: a robot learns a manipulation skill from a human demonstration">
+</p>
+
+# HOST: Robots Acquire Manipulation Skills in Seconds from a Single Human Video
 
 <p align="center">
   <b>HOST: Human-to-robot One-Shot Skill AcquisiTion</b>
