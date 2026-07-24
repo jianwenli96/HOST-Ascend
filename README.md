@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/host_icon_v2.png" width="200" alt="HOST method icon: a robot learns a manipulation skill from a human demonstration">
+  <img src="assets/ICON.png" width="200" alt="HOST method icon: a human demonstration transfers a manipulation skill to a robot">
 </p>
 
 # HOST: Robots Acquire Manipulation Skills in Seconds from a Single Human Video
@@ -65,7 +65,10 @@ weights, previously mastered skills are retained.
 - **Inference-time skill acquisition:** one human video, no fine-tuning, and no parameter update.
 - **Fast acquisition:** 29 seconds per novel skill on average, including recording the
   demonstration.
-- **Broad real-robot evaluation:** 62% average success across 50 novel manipulation tasks.
+- **Broad real-robot evaluation:** acquires executable skills across 50 novel manipulation tasks,
+  each evaluated over 20 trials.
+- **Strong novel-task performance:** achieves 62% average success on the task subset used for
+  baseline comparisons.
 - **Data and time efficiency:** 50 times fewer demonstrations and 507 times faster acquisition
   than the strongest task-specific fine-tuning baseline evaluated in the paper.
 - **Skill retention:** new skills are supplied through external video context rather than written
@@ -164,12 +167,11 @@ large-model stacks and PyTorch versions.
 | Module | Conda environment | Dependency definition | Main framework |
 |---|---|---|---|
 | `alignment/` | `HOST_Alignment` | [`alignment/environment.yml`](./alignment/environment.yml) | PyTorch 2.4.0 + CUDA 12.4 |
-| `policy_training/` | `HOST_Policy` | [`policy_training/environment.yml`](./policy_training/environment.yml) | PyTorch 2.6.0 + CUDA 12.4 |
+| `policy_training/` | `host_policy` | [`policy_training/environment.yml`](./policy_training/environment.yml) | PyTorch 2.6.0 + CANN-matched `torch-npu` |
 
 There is no single root-level `requirements.txt`. The complete alignment environment is recorded
-in `alignment/environment.yml`, exported from the local alignment environment. The complete policy
-environment is recorded in `policy_training/environment.yml`, exported from the local `lingbot`
-environment. Policy package dependencies are also declared in
+in `alignment/environment.yml`, exported from the local alignment environment. The portable policy
+environment records its top-level dependencies in `policy_training/environment.yml`. Policy package dependencies are also declared in
 [`policy_training/pyproject.toml`](./policy_training/pyproject.toml). Keeping the two Conda
 definitions separate preserves their respective PyTorch stacks.
 
@@ -180,12 +182,12 @@ conda env create -f alignment/environment.yml
 conda activate HOST_Alignment
 ```
 
-Create the policy-training environment from the local `lingbot` export, then install the repository
-package in editable mode without resolving a second dependency set:
+Create the policy-training environment, then install the repository package in editable mode
+without resolving a second dependency set:
 
 ```bash
 conda env create -f policy_training/environment.yml
-conda activate HOST_Policy
+conda activate host_policy
 pip install -e ./policy_training --no-deps
 ```
 
