@@ -42,6 +42,42 @@ Verification: this is a one-off, offline data-preprocessing script, not a traini
 via static checks (`ast.parse`, CLI argument consistency) rather than the actual-run training
 protocol used for `policy_training/`/`alignment/`.
 
+### 1.1. Paired HumanAndRobot HDF5 conversion
+
+`convert_human_and_robot.py` handles the paired HDF5 layout from the HumanAndRobot dataset. Each
+source file contains synchronized `/cam_data/human_camera` and `/cam_data/robot_camera` arrays.
+The converter writes separate robot Main and human Reference episode directories, uses all human
+episodes of the same task as the robot episode's training reference pool, and fixes evaluation to
+the synchronized pair from the same HDF5 file. Each robot episode receives a 7D robot action
+trajectory built from `/end_position` (XYZ position plus XYZ Euler rotation) and `/gripper_state`,
+together with 14D robot proprioception built from the seven joint positions in `/qpos` and seven
+joint velocities in `/qvel`. The v1 `/action` field is deliberately excluded because it stores the
+human hand pose rather than the robot action. Positions are converted from millimetres to metres;
+Euler angles, joint positions, and joint velocities are converted from degrees/degrees per second
+to radians/radians per second.
+
+JPEG image sequences are used because they work with the image-loading path without depending on
+the codecs supported by the installed `decord`/FFmpeg build.
+
+```bash
+python data_preprocessing/convert_human_and_robot.py \
+  --input-dir /path/to/HumanAndRobot/data \
+  --output-dir /path/to/HumanAndRobot/align_data
+```
+
+The output includes `HumanAndRobot_video_paths.json`,
+`cam_mapping/HumanAndRobot_cam_mapping.json`, per-episode `task_paths.json` and
+`task_paths_eval.json`, robot trajectory JSON files,
+`joint_action_mapping/HumanAndRobot_joint_action_mapping.json`, instructions, and
+`conversion_manifest.json`. Launch alignment with the generated camera mapping:
+
+```bash
+HOST_CAM_MAPPING_DIR=/path/to/HumanAndRobot/align_data/cam_mapping \
+HOST_JOINT_ACTION_MAPPING_DIR=/path/to/HumanAndRobot/align_data/joint_action_mapping \
+VIDEO_PATHS=/path/to/HumanAndRobot/align_data/HumanAndRobot_video_paths.json \
+bash alignment/train_scripts/run_ds.sh
+```
+
 ## 2. Dataset format
 
 `policy_training/` (self-grounded prediction) and `alignment/` (target coupling) consume the
