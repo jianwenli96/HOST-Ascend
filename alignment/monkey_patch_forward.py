@@ -720,8 +720,9 @@ def qwen3_vl_conditional_generation_forward(
     video_grid_thw: Optional[torch.LongTensor] = None,
     cache_position: Optional[torch.LongTensor] = None,
     logits_to_keep: Union[int, torch.Tensor] = 0,
+    return_hidden_only: bool = False,
     **kwargs: Unpack[TransformersKwargs],
-) -> Union[tuple, Qwen3VLCausalLMOutputWithPast]:
+) -> Union[tuple, Qwen3VLModelOutputWithPast, Qwen3VLCausalLMOutputWithPast]:
     r"""
     labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
         Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
@@ -731,6 +732,9 @@ def qwen3_vl_conditional_generation_forward(
         The temporal, height and width of feature shape of each image in LLM.
     video_grid_thw (`torch.LongTensor` of shape `(num_videos, 3)`, *optional*):
         The temporal, height and width of feature shape of each video in LLM.
+    return_hidden_only (`bool`, *optional*, defaults to `False`):
+        Return the multimodal backbone output before the language-model head.
+        Used by alignment, which consumes representations instead of token logits.
 
     Example:
         TODO: Add example
@@ -748,6 +752,13 @@ def qwen3_vl_conditional_generation_forward(
         cache_position=cache_position,
         **kwargs,
     )
+
+    # Alignment consumes the backbone's last hidden state directly and has no
+    # language-modeling loss.  Returning here avoids materializing the very
+    # large [batch, sequence, vocab] logits tensor while keeping the default
+    # conditional-generation path unchanged for callers such as generate().
+    if return_hidden_only:
+        return outputs
 
     hidden_states = outputs[0]
 

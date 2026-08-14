@@ -38,6 +38,18 @@ class BaseModel(nn.Module):
                 device_map="cpu", 
                 attn_implementation="sdpa"
             )
+
+            # Embedding checkpoints do not use the vocabulary projection. Keep
+            # the module in the state dict for HF/checkpoint compatibility, but
+            # exclude it from training so DeepSpeed does not allocate gradient
+            # and optimizer state for a randomly initialized, unused LM head.
+            if getattr(self.base_model.config, 'tie_word_embeddings', False):
+                raise ValueError(
+                    "Cannot freeze lm_head because tie_word_embeddings=True; "
+                    "this would also freeze the input token embeddings."
+                )
+            self.base_model.lm_head.requires_grad_(False)
+
             self.base_model.gradient_checkpointing_enable()
             
         else:
@@ -60,8 +72,8 @@ class BaseModel(nn.Module):
                 'attention_mask': inputs['attention_mask'],
                 'pixel_values': inputs['pixel_values'],
                 'image_grid_thw': inputs['image_grid_thw'],
-                'output_hidden_states': True,
-                'return_dict': True
+                'return_hidden_only': True,
+                'use_cache': False,
             }
             
             if 'pixel_values_videos' in inputs and inputs['pixel_values_videos'] is not None:
@@ -82,8 +94,7 @@ class BaseModel(nn.Module):
             outputs = self.base_model(**forward_kwargs)
             
             # Extract features: Average pool image tokens from last hidden state
-            # Qwen3VLCausalLMOutputWithPast does not have last_hidden_state attribute, use hidden_states[-1]
-            hidden_states = outputs.hidden_states[-1] # (Total_Frames, Seq_Len, Hidden_Size)
+            hidden_states = outputs.last_hidden_state # (Total_Frames, Seq_Len, Hidden_Size)
 
             input_ids = inputs['input_ids']
 

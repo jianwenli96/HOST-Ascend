@@ -176,10 +176,15 @@ def train(argv):
   if is_master:
       logging.info(f"Final DeepSpeed Config: {json.dumps(ds_config, indent=2)}")
 
+  # DeepSpeed does not automatically filter an explicitly supplied parameter
+  # iterable. Exclude frozen parameters (notably the unused Qwen LM head) from
+  # the optimizer and its ZeRO-partitioned states.
+  trainable_parameters = [p for p in algo.parameters() if p.requires_grad]
+
   model_engine, optimizer, _, scheduler = deepspeed.initialize(
       args=FLAGS,
       model=algo,
-      model_parameters=algo.parameters(),
+      model_parameters=trainable_parameters,
       config=ds_config
   )
   

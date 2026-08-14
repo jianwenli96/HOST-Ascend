@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# Reduce NPU allocator fragmentation for variable-size packed video batches.
+# Respect an explicit caller-provided allocator configuration.
+export PYTORCH_NPU_ALLOC_CONF="${PYTORCH_NPU_ALLOC_CONF:-expandable_segments:True}"
+
 # Ensure we are in the project root directory
 cd "$(dirname "$0")/.."
 
@@ -50,6 +54,7 @@ fi
 
 export WANDB_PROJECT="${BASE_PROJECT_NAME}_${TIMESTAMP}"
 echo "WandB Project: $WANDB_PROJECT"
+echo "NPU allocator config: $PYTORCH_NPU_ALLOC_CONF"
 
 # Detect GPU count
 if [ -n "${ASCEND_RT_VISIBLE_DEVICES+x}" ]; then
