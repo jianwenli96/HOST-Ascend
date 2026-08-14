@@ -4,6 +4,12 @@
 import os
 import json
 import torch
+try:
+    import torch_npu
+    from torch_npu.contrib import transfer_to_npu
+except Exception:
+    pass
+
 import deepspeed
 from multiprocessing import Manager
 from absl import app
@@ -20,6 +26,9 @@ from utils import log_and_save_high_loss_samples
 flags.DEFINE_string('logdir', None, 'Path to save evaluation results.')
 flags.DEFINE_string('resume_dir', None, 'Path to checkpoint directory to load model from.')
 flags.DEFINE_string('network', 'Qwen3-VL-Embedding-8B', 'Base network to use (must contain "Qwen3-VL").')
+flags.DEFINE_string(
+    'model_name_or_path', None,
+    'Local path or Hugging Face model ID used to load the backbone and processor.')
 flags.DEFINE_string('video_paths', None, 'Comma-separated list of paths to video_paths.json.')
 flags.DEFINE_integer('local_rank', -1, 'Local rank for distributed training')
 flags.DEFINE_string('ds_config', 'scripts/ds_config_zero3.json', 'Path to DeepSpeed config json.')
@@ -35,6 +44,14 @@ flags.DEFINE_boolean(
 
 FLAGS = flags.FLAGS
 
+
+def _resolve_ds_config_path(path):
+  """Resolves a DeepSpeed config relative to cwd, then this entrypoint."""
+  path = os.path.expanduser(path)
+  if os.path.isabs(path) or os.path.isfile(path):
+      return path
+  return os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
+
 def evaluate(argv):
   """Evaluates model using the same logic as training."""
 
@@ -44,6 +61,16 @@ def evaluate(argv):
 
   if FLAGS.network:
       CONFIG.MODEL.BASE_MODEL.NETWORK = FLAGS.network
+
+  if FLAGS.model_name_or_path:
+    CONFIG.MODEL.BASE_MODEL.MODEL_NAME_OR_PATH = FLAGS.model_name_or_path
+
+  if FLAGS.video_paths:
+    video_paths_files = [path.strip() for path in FLAGS.video_paths.split(",") if path.strip()]
+    if len(video_paths_files) == 1:
+        data_root = os.path.dirname(os.path.abspath(video_paths_files[0]))
+        CONFIG.DATA.CAM_MAPPING_DIR = os.path.join(data_root, "cam_mapping")
+        CONFIG.JOINTS.JOINT_ACTION_MAPPING_DIR = os.path.join(data_root, "joint_action_mapping")
 
   if FLAGS.eval_chunk_probs:
       probs = [float(x) for x in FLAGS.eval_chunk_probs.split(',')]
@@ -87,7 +114,7 @@ def evaluate(argv):
 
   algo = Alignment()
 
-  ds_config_path = FLAGS.ds_config
+  ds_config_path = _resolve_ds_config_path(FLAGS.ds_config)
   if is_master:
       logging.info(f"Loading DeepSpeed config from: {ds_config_path}")
       
@@ -170,10 +197,7 @@ def evaluate(argv):
   processor = None
   if 'Qwen' in CONFIG.MODEL.BASE_MODEL.NETWORK:
       try:
-          # TODO(open-source): internal-cluster path; eval-only, not exercised by the
-          # verified training run. Same planned fix as models.py/train.py. See
-          # OPEN_SOURCE_PATH_TODOS.md.
-          model_name = '/mnt/data/checkpoint/ethanchen/Qwen3/Qwen3-VL-Embedding-8B'
+          model_name = CONFIG.MODEL.BASE_MODEL.MODEL_NAME_OR_PATH
           if is_master:
               logging.info(f"Loading processor for {model_name}")
           processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)

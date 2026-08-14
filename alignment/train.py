@@ -5,6 +5,12 @@ import os
 import json
 import re
 import torch
+try:
+    import torch_npu
+    from torch_npu.contrib import transfer_to_npu
+except Exception:
+    pass
+
 import deepspeed
 from absl import app
 from absl import flags
@@ -30,15 +36,26 @@ flags.DEFINE_boolean(
     'By default switched off to prevent overwriting existing '
     'experiments.')
 flags.DEFINE_string('network', 'Qwen3-VL-Embedding-8B', 'Base network to use (must contain "Qwen3-VL").')
+flags.DEFINE_string(
+    'model_name_or_path', None,
+    'Local path or Hugging Face model ID used to load the backbone and processor.')
 flags.DEFINE_string('video_paths', None, 'Comma-separated list of paths to video_paths.json.')
 flags.DEFINE_integer('local_rank', -1, 'Local rank for distributed training')
 flags.DEFINE_integer('gradient_accumulation_steps', 1, 'Gradient accumulation steps.')
-flags.DEFINE_string('ds_config', 'scripts/ds_config.json', 'Path to DeepSpeed config json.')
+flags.DEFINE_string('ds_config', 'scripts/ds_config_zero3.json', 'Path to DeepSpeed config json.')
 flags.DEFINE_integer('save_interval', None, 'Number of steps between saving checkpoints.')
 flags.DEFINE_integer('max_iters', None, 'Total number of training steps.')
 flags.DEFINE_integer('num_align_frames', None, 'Number of frames to use for alignment.')
 
 FLAGS = flags.FLAGS
+
+
+def _resolve_ds_config_path(path):
+  """Resolves a DeepSpeed config relative to cwd, then this entrypoint."""
+  path = os.path.expanduser(path)
+  if os.path.isabs(path) or os.path.isfile(path):
+      return path
+  return os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
 
 def train(argv):
   """Trains model and evaluates on relevant downstream tasks."""
@@ -54,6 +71,16 @@ def train(argv):
 
   if FLAGS.network:
       CONFIG.MODEL.BASE_MODEL.NETWORK = FLAGS.network
+
+  if FLAGS.model_name_or_path:
+      CONFIG.MODEL.BASE_MODEL.MODEL_NAME_OR_PATH = FLAGS.model_name_or_path
+
+  if FLAGS.video_paths:
+    video_paths_files = [path.strip() for path in FLAGS.video_paths.split(",") if path.strip()]
+    if len(video_paths_files) == 1:
+        data_root = os.path.dirname(os.path.abspath(video_paths_files[0]))
+        CONFIG.DATA.CAM_MAPPING_DIR = os.path.join(data_root, "cam_mapping")
+        CONFIG.JOINTS.JOINT_ACTION_MAPPING_DIR = os.path.join(data_root, "joint_action_mapping")
 
   deepspeed.init_distributed()
   local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -102,7 +129,7 @@ def train(argv):
               logging.warning(f"pretrain_weights: unexpected extra keys: {unexpected[:10]}")
       del raw, state_dict  # free CPU memory before DeepSpeed moves model to GPU
 
-  ds_config_path = FLAGS.ds_config
+  ds_config_path = _resolve_ds_config_path(FLAGS.ds_config)
   if is_master:
       logging.info(f"Loading DeepSpeed config from: {ds_config_path}")
       
@@ -207,11 +234,7 @@ def train(argv):
   processor = None
   if 'Qwen' in CONFIG.MODEL.BASE_MODEL.NETWORK:
       try:
-          # Use local path for Qwen3-VL-Embedding-8B
-          # TODO(open-source): internal-cluster path, load-bearing for the verified
-          # training run — do not remove without re-verifying end-to-end. Same fix as
-          # models.py (env var + public HF fallback). See OPEN_SOURCE_PATH_TODOS.md.
-          model_name = '/mnt/data/checkpoint/ethanchen/Qwen3/Qwen3-VL-Embedding-8B'
+          model_name = CONFIG.MODEL.BASE_MODEL.MODEL_NAME_OR_PATH
           if is_master:
               logging.info(f"Loading processor for {model_name}")
           processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)

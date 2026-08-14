@@ -119,7 +119,11 @@ class Algorithm(nn.Module):
         data['qwen_input'] = data.get('qwen_input_paired', data['qwen_input'])
 
         # ---- Ref embedding cache (eval only, all_hit already decided above) ----
-        if all_hit:
+        if training:
+            B = embs.size(0) // 2
+            embs_main = embs[:B]
+            embs_ref  = embs[B:]
+        elif all_hit:
             # Cache hit: Qwen ran on main_only only; concat cached refs
             embs_main = embs
             n = len(data['ref_frame_paths']) // 2

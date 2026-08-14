@@ -76,7 +76,9 @@ CONFIG.JOINTS.USE_JOINTS = False     # set True + JOINT_ACTION_MAPPING_DIR to co
 ## Training
 
 ```bash
-VIDEO_PATHS=/path/to/video_paths.json bash train_scripts/run_ds.sh
+MODEL_NAME_OR_PATH=/path/to/Qwen3-VL-Embedding-8B \
+VIDEO_PATHS=/path/to/video_paths.json \
+bash train_scripts/run_ds.sh
 ```
 
 This wraps `train.py` with `torchrun` + DeepSpeed ZeRO-3. Key flags (see `train.py --help` for the
@@ -87,7 +89,11 @@ full list): `--video_paths` (required), `--network` (`Qwen3-VL-Embedding-8B` is 
 ## Evaluation
 
 ```bash
-python evaluate_v2.py --video_paths <your_video_paths.json> --network Qwen3-VL-Embedding-8B --resume_dir <checkpoint_dir>
+torchrun evaluate_v2.py \
+  --model_name_or_path <model_path_or_hf_id> \
+  --video_paths <your_video_paths.json> \
+  --network Qwen3-VL-Embedding-8B \
+  --resume_dir <checkpoint_dir>
 ```
 
 Evaluates alignment quality (embedding-space nearest-neighbor correspondence) between Main and

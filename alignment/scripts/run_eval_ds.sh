@@ -46,6 +46,7 @@ RANK=${RANK:-0}
 
 # Define default arguments
 NETWORK="Qwen3-VL-Embedding-8B"
+MODEL_NAME_OR_PATH=""
 # Evaluation dataset path — pass your own via --video_paths
 VIDEO_PATHS=""
 
@@ -79,12 +80,22 @@ while [[ $# -gt 0 ]]; do
             NETWORK="$2"
             shift 2
             ;;
+        --model_name_or_path)
+            MODEL_NAME_OR_PATH="$2"
+            shift 2
+            ;;
         *)
             echo "Unknown argument: $1"
             exit 1
             ;;
     esac
 done
+
+if [ -z "$MODEL_NAME_OR_PATH" ]; then
+    echo "Error: --model_name_or_path must be specified for evaluation."
+    echo "Usage: $0 --model_name_or_path /path/to/model --resume_dir /path/to/checkpoint --video_paths /path/to/video_paths.json"
+    exit 1
+fi
 
 # Check if RESUME_DIR is provided
 if [ -z "$RESUME_DIR" ]; then
@@ -116,6 +127,7 @@ echo "  Loading checkpoint from: $RESUME_DIR"
 echo "  Saving results to: $LOGDIR"
 echo "  WandB Project: $WANDB_PROJECT"
 echo "  Network: $NETWORK"
+echo "  Model Name or Path: $MODEL_NAME_OR_PATH"
 echo "  Video Paths: $VIDEO_PATHS"
 echo "  Batch Size: $BATCH_SIZE"
 echo "  Eval Chunk Probs: $EVAL_CHUNK_PROBS (1x, 2x, 4x)"
@@ -123,10 +135,28 @@ echo "  GPUs: $NUM_GPUS"
 echo "==================================="
 
 # Build arguments (using absl flags format for evaluate_v2.py)
-ARGS="--logdir=$LOGDIR --resume_dir=$RESUME_DIR --network=$NETWORK --video_paths=$VIDEO_PATHS --batch_size=$BATCH_SIZE --eval_chunk_probs=$EVAL_CHUNK_PROBS --ds_config=scripts/ds_config_zero3.json"
+ARGS=(
+    "--logdir=$LOGDIR"
+    "--resume_dir=$RESUME_DIR"
+    "--network=$NETWORK"
+    "--model_name_or_path=$MODEL_NAME_OR_PATH"
+    "--video_paths=$VIDEO_PATHS"
+    "--batch_size=$BATCH_SIZE"
+    "--eval_chunk_probs=$EVAL_CHUNK_PROBS"
+    --ds_config=scripts/ds_config_zero3.json
+)
 
 # Launch with torchrun - use evaluate_v2.py which is based on train.py
-CMD="torchrun --nproc_per_node=$NUM_GPUS --nnodes=$WORLD_SIZE --node_rank=$RANK --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT evaluate_v2.py $ARGS"
-echo "Running: $CMD"
+CMD=(
+    torchrun
+    "--nproc_per_node=$NUM_GPUS"
+    "--nnodes=$WORLD_SIZE"
+    "--node_rank=$RANK"
+    "--master_addr=$MASTER_ADDR"
+    "--master_port=$MASTER_PORT"
+    evaluate_v2.py
+    "${ARGS[@]}"
+)
+echo "Running: ${CMD[*]}"
 echo ""
-$CMD
+"${CMD[@]}"

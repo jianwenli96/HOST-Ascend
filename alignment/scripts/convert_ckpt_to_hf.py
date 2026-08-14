@@ -96,7 +96,7 @@ def convert(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint_path", type=str, required=True, help="Path to the converted pytorch_model.bin")
-    parser.add_argument("--model_name_or_path", type=str, default="/mnt/data/checkpoint/ethanchen/Qwen3/Qwen3-VL-Embedding-8B", help="Path to original HF model for config")
+    parser.add_argument("--model_name_or_path", type=str, required=True, help="Path or Hugging Face ID of the original model")
     parser.add_argument("--output_dir", type=str, required=True, help="Directory to save HF model")
     args = parser.parse_args()
     
