@@ -367,10 +367,6 @@ def setup_train_dir(logdir):
         config = dict([(k, to_dict(v)) for k, v in CONFIG.items()])
         yaml.safe_dump(config, config_file, default_flow_style=False)
 
-    train_logs_dir = os.path.join(logdir, 'train_logs')
-    if not os.path.exists(train_logs_dir):
-        os.makedirs(train_logs_dir)
-
 def get_cnn_feats(cnn, data, training, num_steps=None):
     """Passes data through base CNN."""
     if num_steps is None:

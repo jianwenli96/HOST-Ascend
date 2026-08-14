@@ -1,9 +1,10 @@
 #!/bin/bash
-set -e
+set -eo pipefail
 
 # Reduce NPU allocator fragmentation for variable-size packed video batches.
 # Respect an explicit caller-provided allocator configuration.
 export PYTORCH_NPU_ALLOC_CONF="${PYTORCH_NPU_ALLOC_CONF:-expandable_segments:True}"
+conda activate host_alignment
 
 # Ensure we are in the project root directory
 cd "$(dirname "$0")/.."
@@ -53,7 +54,22 @@ else
 fi
 
 export WANDB_PROJECT="${BASE_PROJECT_NAME}_${TIMESTAMP}"
+LOGDIR="logs/$WANDB_PROJECT"
+TRAIN_LOG_DIR="$LOGDIR/train_logs"
+mkdir -p "$TRAIN_LOG_DIR"
+
+# Mirror subsequent launcher and training output to a persistent log while
+# keeping it visible in the terminal. Avoid concurrent writes to one file in
+# multi-node runs; the primary node keeps the conventional train.log name.
+if [ "$RANK" -eq 0 ]; then
+    LOG_FILE="$TRAIN_LOG_DIR/train.log"
+else
+    LOG_FILE="$TRAIN_LOG_DIR/train_node_${RANK}.log"
+fi
+exec > >(tee -a "$LOG_FILE") 2>&1
+
 echo "WandB Project: $WANDB_PROJECT"
+echo "Training log: $LOG_FILE"
 echo "NPU allocator config: $PYTORCH_NPU_ALLOC_CONF"
 
 # Detect GPU count
@@ -78,7 +94,6 @@ RANK=${RANK:-0}
 DS_CONFIG="scripts/ds_config_zero3.json"
 # To resume from a previous run, set: RESUME_DIR="/path/to/previous/run/logs/tcc_qwen_alignment_<timestamp>"
 
-LOGDIR="logs/$WANDB_PROJECT"
 SAVE_INTERVAL=500
 MAX_ITERS=10000
 ARGS=(
@@ -99,8 +114,6 @@ fi
 if [ -n "${PRETRAIN_WEIGHTS:-}" ]; then
     ARGS+=(--pretrain_weights "$PRETRAIN_WEIGHTS")
 fi
-
-mkdir -p "$LOGDIR"
 
 # Launch with torchrun
 CMD=(
