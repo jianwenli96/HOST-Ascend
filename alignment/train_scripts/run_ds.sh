@@ -4,7 +4,6 @@ set -eo pipefail
 # Reduce NPU allocator fragmentation for variable-size packed video batches.
 # Respect an explicit caller-provided allocator configuration.
 export PYTORCH_NPU_ALLOC_CONF="${PYTORCH_NPU_ALLOC_CONF:-expandable_segments:True}"
-conda activate host_alignment
 
 # Ensure we are in the project root directory
 cd "$(dirname "$0")/.."
@@ -35,22 +34,50 @@ if [ -z "${WANDB_API_KEY}" ]; then
 fi
 BASE_PROJECT_NAME="host_alignment"
 
-# Synchronization logic for timestamp
-# Assuming RANK is provided by environment (e.g. SLURM_NODEID) or defaults to 0
-RANK=${RANK:-${SLURM_NODEID:-0}}
-mkdir -p "./train_sync"
-SYNC_FILE="./train_sync/tcc_timestamp_${BASE_PROJECT_NAME}"
+# Torchrun configuration
+# DLC/Kubernetes usually provide these. We set defaults for local run.
+MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
+MASTER_PORT=${MASTER_PORT:-"29500"}
+NNODES=${NNODES:-1}          # Total number of nodes
+NODE_RANK=${NODE_RANK:-0}    # Current node rank
 
-if [ "$RANK" -eq 0 ]; then
+# Synchronization logic for timestamp across nodes using TCPStore
+# This bypasses NFS caching issues that can cause different nodes to use different timestamps
+if [ "$NNODES" -le 1 ]; then
     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-    echo "${TIMESTAMP}" > "${SYNC_FILE}"
 else
-    echo "Node ${RANK} waiting for timestamp in ${SYNC_FILE}..."
-    # Wait loop
-    while [ ! -f "${SYNC_FILE}" ]; do
-        sleep 1
-    done
-    TIMESTAMP=$(cat "${SYNC_FILE}")
+    SYNC_PORT="${TIMESTAMP_SYNC_PORT:-$((MASTER_PORT + 11))}"
+    SYNC_TIMEOUT="${TIMESTAMP_SYNC_TIMEOUT:-180}"
+
+    TIMESTAMP=$(python3 - <<PY
+import datetime
+import os
+from datetime import timedelta
+
+import torch.distributed as dist
+
+host = "${MASTER_ADDR}"
+port = ${SYNC_PORT}
+timeout_s = ${SYNC_TIMEOUT}
+node_rank = ${NODE_RANK}
+num_nodes = ${NNODES}
+
+store = dist.TCPStore(
+    host_name=host,
+    port=port,
+    world_size=num_nodes,
+    is_master=(node_rank == 0),
+    timeout=timedelta(seconds=timeout_s),
+)
+key = "timestamp::${BASE_PROJECT_NAME}"
+if node_rank == 0:
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    store.set(key, ts)
+ts = store.get(key).decode("utf-8")
+print(ts)
+PY
+    )
+    echo "Timestamp synchronized via TCPStore: ${TIMESTAMP} (port=${SYNC_PORT})"
 fi
 
 export WANDB_PROJECT="${BASE_PROJECT_NAME}_${TIMESTAMP}"
@@ -61,10 +88,10 @@ mkdir -p "$TRAIN_LOG_DIR"
 # Mirror subsequent launcher and training output to a persistent log while
 # keeping it visible in the terminal. Avoid concurrent writes to one file in
 # multi-node runs; the primary node keeps the conventional train.log name.
-if [ "$RANK" -eq 0 ]; then
+if [ "$NODE_RANK" -eq 0 ]; then
     LOG_FILE="$TRAIN_LOG_DIR/train.log"
 else
-    LOG_FILE="$TRAIN_LOG_DIR/train_node_${RANK}.log"
+    LOG_FILE="$TRAIN_LOG_DIR/train_node_${NODE_RANK}.log"
 fi
 exec > >(tee -a "$LOG_FILE") 2>&1
 
@@ -75,20 +102,23 @@ echo "NPU allocator config: $PYTORCH_NPU_ALLOC_CONF"
 # Detect GPU count
 if [ -n "${ASCEND_RT_VISIBLE_DEVICES+x}" ]; then
     NUM_GPUS=$(echo "$ASCEND_RT_VISIBLE_DEVICES" | tr ',' '\n' | grep -v '^$' | wc -l)
-elif command -v nvidia-smi &> /dev/null; then
-    NUM_GPUS=$(nvidia-smi --list-gpus | wc -l)
+elif command -v npu-smi &> /dev/null; then
+    NUM_GPUS=$(npu-smi info -l | grep "Total Count" | awk '{print $NF}')
 else
     NUM_GPUS=0
 fi
 
-echo "Detected $NUM_GPUS GPUs."
+if [ "$NUM_GPUS" -eq 0 ]; then
+    echo "ERROR: No NPUs detected. Set ASCEND_RT_VISIBLE_DEVICES or run on a node with npu-smi." >&2
+    exit 1
+fi
 
-# Torchrun configuration
-# DLC/Kubernetes usually provide these. We set defaults for local run.
-MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
-MASTER_PORT=${MASTER_PORT:-"29500"}
-WORLD_SIZE=${WORLD_SIZE:-1}
-RANK=${RANK:-0}
+echo "Cluster Configuration:"
+echo "  - Total Nodes (NNODES): $NNODES"
+echo "  - Current Node Rank: $NODE_RANK"
+echo "  - Master Address: $MASTER_ADDR"
+echo "  - Master Port: $MASTER_PORT"
+echo "  - NPUs per Node: $NUM_GPUS"
 
 # Define arguments
 DS_CONFIG="scripts/ds_config_zero3.json"
@@ -116,11 +146,12 @@ if [ -n "${PRETRAIN_WEIGHTS:-}" ]; then
 fi
 
 # Launch with torchrun
+conda activate host_alignment
 CMD=(
     torchrun
     "--nproc_per_node=$NUM_GPUS"
-    "--nnodes=$WORLD_SIZE"
-    "--node_rank=$RANK"
+    "--nnodes=$NNODES"
+    "--node_rank=$NODE_RANK"
     "--master_addr=$MASTER_ADDR"
     "--master_port=$MASTER_PORT"
     train.py

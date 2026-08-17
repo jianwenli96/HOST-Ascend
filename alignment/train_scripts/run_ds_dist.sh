@@ -40,11 +40,16 @@ else
     # Detect GPU count locally
     if [ -n "${ASCEND_RT_VISIBLE_DEVICES+x}" ]; then
         NUM_GPUS=$(echo "$ASCEND_RT_VISIBLE_DEVICES" | tr ',' '\n' | grep -v '^$' | wc -l)
-    elif command -v nvidia-smi &> /dev/null; then
-        NUM_GPUS=$(nvidia-smi --list-gpus | wc -l)
+    elif command -v npu-smi &> /dev/null; then
+        NUM_GPUS=$(npu-smi info -l | grep "Total Count" | awk '{print $NF}')
     else
         NUM_GPUS=0
     fi
+fi
+
+if [ "$NUM_GPUS" -eq 0 ]; then
+    echo "ERROR: No NPUs detected. Set MA_NUM_GPUS, ASCEND_RT_VISIBLE_DEVICES, or run on a node with npu-smi." >&2
+    exit 1
 fi
 
 echo "Cluster Configuration:"
@@ -52,7 +57,7 @@ echo "  - Total Nodes (NNODES): $NNODES"
 echo "  - Current Node Rank: $NODE_RANK"
 echo "  - Master Address: $MASTER_ADDR"
 echo "  - Master Port: $MASTER_PORT"
-echo "  - GPUs per Node: $NUM_GPUS"
+echo "  - NPUs per Node: $NUM_GPUS"
 
 # ============================================================================
 # HCCL / Ascend NPU Configuration
@@ -73,19 +78,43 @@ if [ -z "${WANDB_API_KEY}" ]; then
 fi
 BASE_PROJECT_NAME="host_alignment"
 
-# Synchronization logic for timestamp across nodes
-mkdir -p "./train_sync"
-SYNC_FILE="./train_sync/tcc_timestamp_${BASE_PROJECT_NAME}"
-
-if [ "$NODE_RANK" -eq 0 ]; then
+# Synchronization logic for timestamp across nodes using TCPStore
+# This bypasses NFS caching issues that can cause different nodes to use different timestamps
+if [ "$NNODES" -le 1 ]; then
     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-    echo "${TIMESTAMP}" > "${SYNC_FILE}"
 else
-    echo "Node ${NODE_RANK} waiting for timestamp in ${SYNC_FILE}..."
-    while [ ! -f "${SYNC_FILE}" ]; do
-        sleep 1
-    done
-    TIMESTAMP=$(cat "${SYNC_FILE}")
+    SYNC_PORT="${TIMESTAMP_SYNC_PORT:-$((MASTER_PORT + 11))}"
+    SYNC_TIMEOUT="${TIMESTAMP_SYNC_TIMEOUT:-180}"
+
+    TIMESTAMP=$(python3 - <<PY
+import datetime
+import os
+from datetime import timedelta
+
+import torch.distributed as dist
+
+host = "${MASTER_ADDR}"
+port = ${SYNC_PORT}
+timeout_s = ${SYNC_TIMEOUT}
+node_rank = ${NODE_RANK}
+num_nodes = ${NNODES}
+
+store = dist.TCPStore(
+    host_name=host,
+    port=port,
+    world_size=num_nodes,
+    is_master=(node_rank == 0),
+    timeout=timedelta(seconds=timeout_s),
+)
+key = "timestamp::${BASE_PROJECT_NAME}"
+if node_rank == 0:
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    store.set(key, ts)
+ts = store.get(key).decode("utf-8")
+print(ts)
+PY
+    )
+    echo "Timestamp synchronized via TCPStore: ${TIMESTAMP} (port=${SYNC_PORT})"
 fi
 
 export WANDB_PROJECT="${BASE_PROJECT_NAME}_${TIMESTAMP}"
