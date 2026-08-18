@@ -5,8 +5,8 @@ The source dataset stores a synchronized human video and robot video in each
 HDF5 file.  alignment/ expects its main and reference videos to be separate
 episode directories, so this converter emits one robot episode (main) and one
 human episode (reference) per source file.  Robot episodes are written to the
-dataset's primary ``*_video_paths.json`` and their ``task_paths.json`` files
-point only to human episodes of the same task.
+dataset's primary ``*_video_paths.json`` and each ``task_paths.json`` points to
+the synchronized human/robot counterpart from that same source file.
 
 Robot trajectory JSON files contain the robot end-effector action from
 ``/end_position`` plus ``/gripper_state``, as well as 14-dimensional robot
@@ -113,6 +113,15 @@ def parse_args() -> argparse.Namespace:
         help="JPEG quality in the range 1..100 (default: 95).",
     )
     parser.add_argument(
+        "--val-ratio",
+        type=float,
+        default=0.2,
+        help=(
+            "Per-task validation fraction used for splits/train and splits/val "
+            "video-path lists (default: 0.2)."
+        ),
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Replace existing image sequences and remove stale converter-generated MP4 files.",
@@ -130,6 +139,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--min-frames must be positive")
     if not 1 <= args.jpeg_quality <= 100:
         parser.error("--jpeg-quality must be in the range 1..100")
+    if not 0.0 < args.val_ratio < 1.0:
+        parser.error("--val-ratio must be strictly between 0 and 1")
     return args
 
 
@@ -399,22 +410,63 @@ def group_by_task(episodes: Iterable[EpisodePair]) -> dict[str, list[EpisodePair
     return grouped
 
 
+def coupling_progress_info(frame_count: int) -> dict[str, dict[str, float]]:
+    """Match coupling's reference-frame convention: progress(i) = (i + 1) / N."""
+    denominator = max(frame_count, 1)
+    return {
+        "aligned_progress": {
+            str(index): float((index + 1) / denominator)
+            for index in range(frame_count)
+        }
+    }
+
+
+def split_robot_episodes(
+    grouped: dict[str, list[EpisodePair]], val_ratio: float
+) -> tuple[list[EpisodePair], list[EpisodePair]]:
+    """Create a stable per-task split while keeping at least one train episode."""
+    train: list[EpisodePair] = []
+    val: list[EpisodePair] = []
+    for task_name in sorted(grouped):
+        task_episodes = sorted(grouped[task_name], key=lambda item: natural_key(item.source))
+        if len(task_episodes) < 2:
+            raise ValueError(
+                f"Task {task_name!r} needs at least 2 episodes for a train/val split"
+            )
+        val_count = max(1, int(round(len(task_episodes) * val_ratio)))
+        val_count = min(val_count, len(task_episodes) - 1)
+        train.extend(task_episodes[:-val_count])
+        val.extend(task_episodes[-val_count:])
+    return train, val
+
+
 def write_sidecars(
     episodes: list[EpisodePair], output_dir: Path, dataset_id: str, jpeg_quality: int,
-    action_mapping_file: Path,
+    action_mapping_file: Path, val_ratio: float,
 ) -> None:
     grouped = group_by_task(episodes)
     for task_episodes in grouped.values():
-        human_pool = [str(episode.human_dir) for episode in task_episodes]
-        robot_pool = [str(episode.robot_dir) for episode in task_episodes]
         for episode in task_episodes:
             instruction = task_instruction(episode.task_name)
             for episode_dir in (episode.human_dir, episode.robot_dir):
                 write_text_atomic(episode_dir / "instruction.txt", instruction + "\n")
 
-            # Training may sample any same-task episode from the opposite embodiment.
-            write_json_atomic(episode.robot_dir / "task_paths.json", {"same": human_pool})
-            write_json_atomic(episode.human_dir / "task_paths.json", {"same": robot_pool})
+            # Robot progress is produced later by alignment/coupling.  Use the
+            # exact same reference-frame normalization convention on the human.
+            write_json_atomic(
+                episode.human_dir / "info.json",
+                coupling_progress_info(episode.frame_count),
+            )
+
+            # The DTW sidecar for each robot is produced against its synchronized human.
+            # Keeping that exact pair avoids treating normalized wall-clock time from a
+            # different demonstration as a shared semantic progress manifold.
+            write_json_atomic(
+                episode.robot_dir / "task_paths.json", {"same": [str(episode.human_dir)]}
+            )
+            write_json_atomic(
+                episode.human_dir / "task_paths.json", {"same": [str(episode.robot_dir)]}
+            )
 
             # Evaluation is deterministic and uses the synchronized source pair.
             write_json_atomic(
@@ -426,6 +478,15 @@ def write_sidecars(
 
     video_paths = [str(episode.robot_dir) for episode in episodes]
     write_json_atomic(output_dir / f"{dataset_id}_video_paths.json", video_paths)
+    train_episodes, val_episodes = split_robot_episodes(grouped, val_ratio)
+    write_json_atomic(
+        output_dir / "splits" / "train" / f"{dataset_id}_video_paths.json",
+        [str(episode.robot_dir) for episode in train_episodes],
+    )
+    write_json_atomic(
+        output_dir / "splits" / "val" / f"{dataset_id}_video_paths.json",
+        [str(episode.robot_dir) for episode in val_episodes],
+    )
 
     cam_mapping = {
         str((output_dir / task_name).resolve()): [OUTPUT_VIEW]
@@ -442,10 +503,22 @@ def write_sidecars(
         "tasks": {task: len(items) for task, items in grouped.items()},
         "main_embodiment": "robot",
         "reference_embodiment": "human",
+        "reference_progress": "linear_frame_timeline",
+        "reference_progress_formula": "(frame_index + 1) / frame_count",
+        "train_reference_pool": "synchronized_pair_only",
+        "val_ratio": val_ratio,
+        "train_episode_count": len(train_episodes),
+        "val_episode_count": len(val_episodes),
         "output_view": OUTPUT_VIEW,
         "storage_format": "jpeg_image_sequence",
         "jpeg_quality": jpeg_quality,
         "video_paths_json": str((output_dir / f"{dataset_id}_video_paths.json").resolve()),
+        "train_video_paths_json": str(
+            (output_dir / "splits" / "train" / f"{dataset_id}_video_paths.json").resolve()
+        ),
+        "val_video_paths_json": str(
+            (output_dir / "splits" / "val" / f"{dataset_id}_video_paths.json").resolve()
+        ),
         "cam_mapping_dir": str(mapping_dir.resolve()),
         "robot_action": {
             "source_fields": ["/end_position", "/gripper_state"],
@@ -536,13 +609,34 @@ def verify_robot_trajectory_data(
                 raise ValueError(f"Trajectory field {key!r} in {action_file} differs from source")
 
 
-def verify_conversion(episodes: list[EpisodePair], output_dir: Path, dataset_id: str) -> None:
+def verify_conversion(
+    episodes: list[EpisodePair], output_dir: Path, dataset_id: str, val_ratio: float
+) -> None:
     for episode in episodes:
         for episode_dir in (episode.human_dir, episode.robot_dir):
             assert_images_match(episode_dir / OUTPUT_VIEW, episode)
             for filename in ("instruction.txt", "task_paths.json", "task_paths_eval.json"):
                 if not (episode_dir / filename).is_file():
                     raise ValueError(f"Missing required sidecar: {episode_dir / filename}")
+
+        human_progress_path = episode.human_dir / "info.json"
+        if not human_progress_path.is_file():
+            raise ValueError(f"Missing human progress sidecar: {human_progress_path}")
+        with human_progress_path.open("r", encoding="utf-8") as file:
+            actual_progress = json.load(file).get("aligned_progress")
+        expected_progress = coupling_progress_info(episode.frame_count)["aligned_progress"]
+        if actual_progress != expected_progress:
+            raise ValueError(f"Invalid coupling-compatible human progress in {human_progress_path}")
+
+        expected_human = [str(episode.human_dir)]
+        expected_robot = [str(episode.robot_dir)]
+        for filename in ("task_paths.json", "task_paths_eval.json"):
+            with (episode.robot_dir / filename).open("r", encoding="utf-8") as file:
+                if json.load(file).get("same") != expected_human:
+                    raise ValueError(f"Unexpected robot peer list: {episode.robot_dir / filename}")
+            with (episode.human_dir / filename).open("r", encoding="utf-8") as file:
+                if json.load(file).get("same") != expected_robot:
+                    raise ValueError(f"Unexpected human peer list: {episode.human_dir / filename}")
 
     video_paths_file = output_dir / f"{dataset_id}_video_paths.json"
     cam_mapping_file = output_dir / "cam_mapping" / f"{dataset_id}_cam_mapping.json"
@@ -551,6 +645,19 @@ def verify_conversion(episodes: list[EpisodePair], output_dir: Path, dataset_id:
     expected_paths = [str(episode.robot_dir) for episode in episodes]
     if video_paths != expected_paths:
         raise ValueError(f"Unexpected contents in {video_paths_file}")
+
+    grouped = group_by_task(episodes)
+    train_episodes, val_episodes = split_robot_episodes(grouped, val_ratio)
+    expected_splits = {
+        "train": [str(episode.robot_dir) for episode in train_episodes],
+        "val": [str(episode.robot_dir) for episode in val_episodes],
+    }
+    for split_name, expected_split_paths in expected_splits.items():
+        split_file = output_dir / "splits" / split_name / f"{dataset_id}_video_paths.json"
+        with split_file.open("r", encoding="utf-8") as file:
+            actual_split_paths = json.load(file)
+        if actual_split_paths != expected_split_paths:
+            raise ValueError(f"Unexpected contents in {split_file}")
 
     with cam_mapping_file.open("r", encoding="utf-8") as file:
         cam_mapping = json.load(file)
@@ -562,7 +669,9 @@ def verify_conversion(episodes: list[EpisodePair], output_dir: Path, dataset_id:
 
     print(
         f"Verified {len(episodes)} robot mains + {len(episodes)} human references "
-        f"across {len(expected_tasks)} tasks, including 7D robot actions and 14D proprioception."
+        f"across {len(expected_tasks)} tasks; split={len(train_episodes)} train/"
+        f"{len(val_episodes)} val, including coupling-compatible human progress, "
+        "7D robot actions, and 14D proprioception."
     )
 
 
@@ -575,7 +684,7 @@ def main() -> int:
         episodes = [inspect_source(source, output_dir, args.min_frames) for source in sources]
 
         if args.verify_only:
-            verify_conversion(episodes, output_dir, args.dataset_id)
+            verify_conversion(episodes, output_dir, args.dataset_id, args.val_ratio)
             return 0
 
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -586,9 +695,9 @@ def main() -> int:
         )
         write_sidecars(
             episodes, output_dir, args.dataset_id, args.jpeg_quality,
-            action_mapping_file,
+            action_mapping_file, args.val_ratio,
         )
-        verify_conversion(episodes, output_dir, args.dataset_id)
+        verify_conversion(episodes, output_dir, args.dataset_id, args.val_ratio)
         return 0
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

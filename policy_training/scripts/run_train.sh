@@ -8,11 +8,18 @@ set -euo pipefail
 WORLD_SIZE=${WORLD_SIZE:-1}
 RANK=${RANK:-0}
 MASTER_ADDR=${MASTER_ADDR:-127.0.0.1}
-MASTER_PORT=${MASTER_PORT:-23456}
-if [ -n "${CUDA_VISIBLE_DEVICES:-}" ]; then
-    NGPUS=$(echo $CUDA_VISIBLE_DEVICES | tr ',' '\n' | wc -l)
+MASTER_PORT=${MASTER_PORT:-59013}
+if [ -n "${ASCEND_RT_VISIBLE_DEVICES:-}" ]; then
+    NGPUS=$(echo $ASCEND_RT_VISIBLE_DEVICES | tr ',' '\n' | wc -l)
+elif command -v npu-smi &> /dev/null; then
+    NGPUS=$(npu-smi info -l | grep "Total Count" | awk '{print $NF}')
 else
-    NGPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
+    NGPUS=0
+fi
+
+if [ "${NGPUS}" -le 0 ]; then
+    echo "ERROR: visible device list is empty." >&2
+    exit 1
 fi
 
 EXTRA_ARGS=("$@")
@@ -143,7 +150,7 @@ fi
 
 # ── Launch ───────────────────────────────────────────────────────────────────
 accelerate launch \
-  --config_file scripts/accelerate_configs/accelerate_zero1_ds.yaml \
+  --config_file scripts/accelerate_configs/accelerate_zero3_ds.yaml \
   --num_processes "${TOTAL_PROCESSES}" \
   --num_machines "${WORLD_SIZE}" \
   --machine_rank "${RANK}" \
@@ -154,6 +161,5 @@ accelerate launch \
   "wandb.enabled=true" \
   "wandb.name=${TASK_FULLNAME}_${RUN_ID}" \
   "wandb.project=FAST-WAM" \
-  "model=self_grounded_predictor_joint_cross_attn_ve" \
   "task=${TASK_BASENAME}" \
   "${EXTRA_ARGS[@]}"

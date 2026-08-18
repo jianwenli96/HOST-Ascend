@@ -1,0 +1,31 @@
+defaults:
+  - custom_cross_all
+  - _self_
+
+# Paired HumanAndRobot conversion under align_data/.
+train:
+  data_path: /mi/data2T/lijianwen/Datasets/ICL-TTT/HumanAndRobot/align_data/splits/train/HumanAndRobot_video_paths.json
+  num_view_probs: '{"1": 1.0}'
+  cam_mapping_dir: /mi/data2T/lijianwen/Datasets/ICL-TTT/HumanAndRobot/align_data/cam_mapping
+  joint_action_mapping_dir: /mi/data2T/lijianwen/Datasets/ICL-TTT/HumanAndRobot/align_data/joint_action_mapping
+  # The converter does not provide relative-position normalization statistics.
+  # Use the fully specified absolute-action path for training and evaluation.
+  use_relative_action: false
+  dataset_image_size:
+    HumanAndRobot: [224, 224]
+  dataset_fps:
+    # The source HDF5 has no FPS metadata. Keep 24 until acquisition timing is
+    # confirmed; this value controls action horizon and sampling, not playback.
+    HumanAndRobot: 24
+  processor:
+    # 10 physical action dims (3 position + 6D rotation + gripper),
+    # followed by progress and validity channels.
+    action_output_dim: 12
+    proprio_output_dim: 14
+  task_max_frames:
+    # Must be greater than frames=2.  [2,2] takes the exact-alignment branch
+    # and makes every non-dropped progress_gt the constant [0,1].
+    1: [8, 10]
+
+val:
+  data_path: /mi/data2T/lijianwen/Datasets/ICL-TTT/HumanAndRobot/align_data/splits/val/HumanAndRobot_video_paths.json

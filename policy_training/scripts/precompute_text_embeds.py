@@ -14,6 +14,12 @@ from typing import Any
 
 import hydra
 import torch
+try:
+    import torch_npu
+    from torch_npu.contrib import transfer_to_npu
+except Exception:
+    pass
+
 import torch.distributed as dist
 from omegaconf import DictConfig, ListConfig
 from tqdm import tqdm
@@ -29,8 +35,9 @@ logger = get_logger(__name__)
 DEFAULT_PROMPT = "A video recorded from a robot's point of view executing the following instruction: {task}"
 DEFAULT_MODEL_ID = "Wan-AI/Wan2.2-TI2V-5B"
 DEFAULT_TOKENIZER_MODEL_ID = "Wan-AI/Wan2.1-T2V-1.3B"
-DEFAULT_CONTEXT_LEN = 128
 DEFAULT_BATCH_SIZE = 16
+OUTPUT_MODE_CACHE = "cache"
+OUTPUT_MODE_INSTRUCTION = "instruction"
 
 
 def _init_distributed():
@@ -107,6 +114,21 @@ def _collect_dataset_settings(data_cfg: DictConfig):
     return dataset_dirs, cache_dirs, context_lens
 
 
+def _collect_context_lens(node: Any) -> set[int]:
+    """Collect context_len values from all nested dataset configurations."""
+    context_lens: set[int] = set()
+    if isinstance(node, DictConfig):
+        context_len = node.get("context_len")
+        if context_len is not None:
+            context_lens.add(int(context_len))
+        for value in node.values():
+            context_lens.update(_collect_context_lens(value))
+    elif isinstance(node, ListConfig):
+        for value in node:
+            context_lens.update(_collect_context_lens(value))
+    return context_lens
+
+
 def _resolve_context_len(context_lens: set[int]) -> int:
     if len(context_lens) != 1:
         raise ValueError(
@@ -148,6 +170,34 @@ def _read_unique_prompts(dataset_dirs: list[str]) -> list[str]:
         len(prompts),
     )
     return prompts
+
+
+def _read_episode_prompts(video_paths_json: Path) -> dict[str, list[Path]]:
+    """Map formatted prompts to CustomDataset episode directories."""
+    with video_paths_json.open("r", encoding="utf-8") as f:
+        episode_dirs = json.load(f)
+    if not isinstance(episode_dirs, list) or not episode_dirs:
+        raise ValueError(f"Expected a non-empty path list in {video_paths_json}")
+
+    prompts_to_episode_dirs: dict[str, list[Path]] = {}
+    for raw_dir in episode_dirs:
+        episode_dir = Path(str(raw_dir)).expanduser()
+        instruction_path = episode_dir / "instruction.txt"
+        if not instruction_path.is_file():
+            raise FileNotFoundError(f"Missing instruction: {instruction_path}")
+        task = instruction_path.read_text(encoding="utf-8").strip()
+        if not task:
+            raise ValueError(f"Empty instruction: {instruction_path}")
+        prompt = DEFAULT_PROMPT.format(task=task)
+        prompts_to_episode_dirs.setdefault(prompt, []).append(episode_dir)
+
+    logger.info(
+        "Loaded %d episodes from %s, deduplicated to %d prompts.",
+        len(episode_dirs),
+        video_paths_json,
+        len(prompts_to_episode_dirs),
+    )
+    return prompts_to_episode_dirs
 
 
 def _get_override_prompt(override_instruction: Any) -> str | None:
@@ -192,21 +242,49 @@ def main(cfg: DictConfig):
     if cfg.data is None:
         raise ValueError("`cfg.data` is required.")
 
-    dataset_dirs, cache_dirs, context_lens = _collect_dataset_settings(cfg.data)
-    if not cache_dirs:
-        raise ValueError("No `text_embedding_cache_dir` found under `cfg.data`.")
+    output_mode = str(cfg.get("text_embedding_output_mode", OUTPUT_MODE_CACHE)).strip().lower()
+    if output_mode not in {OUTPUT_MODE_CACHE, OUTPUT_MODE_INSTRUCTION}:
+        raise ValueError(
+            "`text_embedding_output_mode` must be either "
+            f"`{OUTPUT_MODE_CACHE}` or `{OUTPUT_MODE_INSTRUCTION}`, got {output_mode!r}."
+        )
 
-    context_len = _resolve_context_len(context_lens)
-    override_prompt = _get_override_prompt(cfg.get("override_instruction"))
-    if override_prompt is not None:
-        prompts = [override_prompt]
-        logger.info("Using override_instruction; skipping dataset scan and encoding exactly 1 prompt.")
+    prompts_to_episode_dirs: dict[str, list[Path]] = {}
+    cache_dirs: list[Path] = []
+    if output_mode == OUTPUT_MODE_INSTRUCTION:
+        raw_video_paths_json = cfg.get("video_paths_json")
+        if raw_video_paths_json is None or not str(raw_video_paths_json).strip():
+            raise ValueError(
+                "`video_paths_json` is required when "
+                "`text_embedding_output_mode=instruction`."
+            )
+        video_paths_json = Path(str(raw_video_paths_json)).expanduser().resolve()
+        if not video_paths_json.is_file():
+            raise FileNotFoundError(f"Missing video paths JSON: {video_paths_json}")
+        prompts_to_episode_dirs = _read_episode_prompts(video_paths_json)
+        prompts = list(prompts_to_episode_dirs)
+        context_lens = _collect_context_lens(cfg.data)
+        context_len = _resolve_context_len(context_lens)
+        logger.info(
+            "Using instruction output mode; embeddings retain fixed padding length %d.",
+            context_len,
+        )
     else:
-        if not dataset_dirs:
-            raise ValueError("No `dataset_dirs` found under `cfg.data`.")
-        prompts = _read_unique_prompts(dataset_dirs)
+        dataset_dirs, cache_dirs, context_lens = _collect_dataset_settings(cfg.data)
+        if not cache_dirs:
+            raise ValueError("No `text_embedding_cache_dir` found under `cfg.data`.")
+
+        context_len = _resolve_context_len(context_lens)
+        override_prompt = _get_override_prompt(cfg.get("override_instruction"))
+        if override_prompt is not None:
+            prompts = [override_prompt]
+            logger.info("Using override_instruction; skipping dataset scan and encoding exactly 1 prompt.")
+        else:
+            if not dataset_dirs:
+                raise ValueError("No `dataset_dirs` found under `cfg.data`.")
+            prompts = _read_unique_prompts(dataset_dirs)
     if not prompts:
-        logger.warning("No prompts found from tasks.jsonl; nothing to do.")
+        logger.warning("No prompts found; nothing to do.")
         return
 
     if torch.cuda.is_available():
@@ -253,6 +331,7 @@ def main(cfg: DictConfig):
         str(cache_dir): {"new": 0, "overwrite": 0, "skip": 0}
         for cache_dir in cache_dirs
     }
+    instruction_stats = {"new": 0, "overwrite": 0, "skip": 0}
 
     prompts = prompts[rank::world_size] if is_distributed else prompts
 
@@ -260,18 +339,23 @@ def main(cfg: DictConfig):
         fully_cached_local = 0
         prompts_to_encode: list[str] = []
         for prompt in prompts:
-            hashed = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-            filename = f"{hashed}.t5_len{context_len}.{enc_id}.pt"
-            fully_cached = True
-            for cache_dir in cache_dirs:
-                cache_path = cache_dir / filename
-                if not cache_path.exists():
-                    fully_cached = False
-                    break
+            if output_mode == OUTPUT_MODE_INSTRUCTION:
+                output_paths = [
+                    episode_dir / "instruction.pt"
+                    for episode_dir in prompts_to_episode_dirs[prompt]
+                ]
+            else:
+                hashed = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+                filename = f"{hashed}.t5_len{context_len}.{enc_id}.pt"
+                output_paths = [cache_dir / filename for cache_dir in cache_dirs]
+            fully_cached = all(output_path.exists() for output_path in output_paths)
             if fully_cached:
                 fully_cached_local += 1
-                for cache_dir in cache_dirs:
-                    stats[str(cache_dir)]["skip"] += 1
+                if output_mode == OUTPUT_MODE_INSTRUCTION:
+                    instruction_stats["skip"] += len(output_paths)
+                else:
+                    for cache_dir in cache_dirs:
+                        stats[str(cache_dir)]["skip"] += 1
             else:
                 prompts_to_encode.append(prompt)
 
@@ -293,7 +377,13 @@ def main(cfg: DictConfig):
                 to_encode_global,
             )
 
-    logger.info("Writing caches to %d directories.", len(cache_dirs))
+    if output_mode == OUTPUT_MODE_INSTRUCTION:
+        logger.info(
+            "Writing instruction.pt files to %d episode directories.",
+            sum(len(dirs) for dirs in prompts_to_episode_dirs.values()),
+        )
+    else:
+        logger.info("Writing caches to %d directories.", len(cache_dirs))
     prompts_encoded_local = len(prompts)
     prompts_encoded_global = prompts_encoded_local
     if is_distributed:
@@ -328,19 +418,31 @@ def main(cfg: DictConfig):
                         "mask": mask_i,
                     }
 
-                    for cache_dir in cache_dirs:
-                        cache_path = cache_dir / f"{hashed}.t5_len{context_len}.{enc_id}.pt"
-                        key = str(cache_dir)
-                        if cache_path.exists() and not overwrite:
-                            stats[key]["skip"] += 1
-                            continue
+                    if output_mode == OUTPUT_MODE_INSTRUCTION:
+                        for episode_dir in prompts_to_episode_dirs[prompt]:
+                            output_path = episode_dir / "instruction.pt"
+                            if output_path.exists() and not overwrite:
+                                instruction_stats["skip"] += 1
+                                continue
+                            if output_path.exists():
+                                instruction_stats["overwrite"] += 1
+                            else:
+                                instruction_stats["new"] += 1
+                            _atomic_torch_save(payload, output_path)
+                    else:
+                        for cache_dir in cache_dirs:
+                            cache_path = cache_dir / f"{hashed}.t5_len{context_len}.{enc_id}.pt"
+                            key = str(cache_dir)
+                            if cache_path.exists() and not overwrite:
+                                stats[key]["skip"] += 1
+                                continue
 
-                        if cache_path.exists():
-                            stats[key]["overwrite"] += 1
-                        else:
-                            stats[key]["new"] += 1
+                            if cache_path.exists():
+                                stats[key]["overwrite"] += 1
+                            else:
+                                stats[key]["new"] += 1
 
-                        _atomic_torch_save(payload, cache_path)
+                            _atomic_torch_save(payload, cache_path)
 
                 pbar.update(len(batch_prompts))
 
@@ -351,21 +453,33 @@ def main(cfg: DictConfig):
         dist.all_reduce(over_tensor, op=dist.ReduceOp.SUM)
         over_length_global = int(over_tensor.item())
 
-        counts_tensor = torch.tensor(
-            [
-                [stats[str(cache_dir)]["new"], stats[str(cache_dir)]["overwrite"], stats[str(cache_dir)]["skip"]]
-                for cache_dir in cache_dirs
-            ],
-            device=reduce_device,
-            dtype=torch.long,
-        )
-        dist.all_reduce(counts_tensor, op=dist.ReduceOp.SUM)
-        if rank == 0:
-            for idx, cache_dir in enumerate(cache_dirs):
-                key = str(cache_dir)
-                stats[key]["new"] = int(counts_tensor[idx, 0].item())
-                stats[key]["overwrite"] = int(counts_tensor[idx, 1].item())
-                stats[key]["skip"] = int(counts_tensor[idx, 2].item())
+        if output_mode == OUTPUT_MODE_INSTRUCTION:
+            counts_tensor = torch.tensor(
+                [instruction_stats["new"], instruction_stats["overwrite"], instruction_stats["skip"]],
+                device=reduce_device,
+                dtype=torch.long,
+            )
+            dist.all_reduce(counts_tensor, op=dist.ReduceOp.SUM)
+            if rank == 0:
+                instruction_stats["new"] = int(counts_tensor[0].item())
+                instruction_stats["overwrite"] = int(counts_tensor[1].item())
+                instruction_stats["skip"] = int(counts_tensor[2].item())
+        else:
+            counts_tensor = torch.tensor(
+                [
+                    [stats[str(cache_dir)]["new"], stats[str(cache_dir)]["overwrite"], stats[str(cache_dir)]["skip"]]
+                    for cache_dir in cache_dirs
+                ],
+                device=reduce_device,
+                dtype=torch.long,
+            )
+            dist.all_reduce(counts_tensor, op=dist.ReduceOp.SUM)
+            if rank == 0:
+                for idx, cache_dir in enumerate(cache_dirs):
+                    key = str(cache_dir)
+                    stats[key]["new"] = int(counts_tensor[idx, 0].item())
+                    stats[key]["overwrite"] = int(counts_tensor[idx, 1].item())
+                    stats[key]["skip"] = int(counts_tensor[idx, 2].item())
 
     if (not is_distributed) or rank == 0:
         logger.info("Finished precomputing text embeddings.")
@@ -375,15 +489,23 @@ def main(cfg: DictConfig):
             over_length_global,
             prompts_encoded_global,
         )
-        for cache_dir in cache_dirs:
-            key = str(cache_dir)
+        if output_mode == OUTPUT_MODE_INSTRUCTION:
             logger.info(
-                "Cache dir: %s | new=%d overwrite=%d skip=%d",
-                key,
-                stats[key]["new"],
-                stats[key]["overwrite"],
-                stats[key]["skip"],
+                "instruction.pt | new=%d overwrite=%d skip=%d",
+                instruction_stats["new"],
+                instruction_stats["overwrite"],
+                instruction_stats["skip"],
             )
+        else:
+            for cache_dir in cache_dirs:
+                key = str(cache_dir)
+                logger.info(
+                    "Cache dir: %s | new=%d overwrite=%d skip=%d",
+                    key,
+                    stats[key]["new"],
+                    stats[key]["overwrite"],
+                    stats[key]["skip"],
+                )
 
     if is_distributed and dist.is_initialized():
         dist.barrier()

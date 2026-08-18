@@ -2,6 +2,13 @@ import _ensure_project_src
 
 _ensure_project_src.ensure()
 
+import torch
+try:
+    import torch_npu
+    from torch_npu.contrib import transfer_to_npu
+except Exception:
+    pass
+
 import hydra
 from omegaconf import DictConfig
 

@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Any
 
 import torch
+try:
+    import torch_npu
+    from torch_npu.contrib import transfer_to_npu
+except Exception:
+    pass
+
 import torch.nn.functional as F
 from omegaconf import OmegaConf
 
