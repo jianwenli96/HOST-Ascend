@@ -55,7 +55,7 @@ except ImportError as exc:  # pragma: no cover - depends on the selected environ
 
 
 DEFAULT_MAIN_VIEW = "observation.images.head"
-DEFAULT_GRIPPER_VIEW = "observation.images.hand_left"
+DEFAULT_GRIPPER_VIEWS = ("observation.images.hand_left", "observation.images.hand_right")
 ACTION_SOURCE_COLUMNS = (
     "actions.end.position",
     "actions.end.orientation",
@@ -73,8 +73,6 @@ ACTION_KEYS = (
 JOINT_KEYS = ("left_arm_joints", "right_arm_joints")
 TRAJECTORY_KEYS = ACTION_KEYS + JOINT_KEYS
 QUATERNION_ORDER = "xyzw"  # source convention, verified against meta/stats_delta_state.json
-MAIN_VIEW_DIR = "images"
-GRIPPER_VIEW_DIR = "gripper_images"
 EXCLUDED_SOURCE_COLUMNS = (
     "actions.joint.position",
     "actions.waist.position",
@@ -115,6 +113,18 @@ def natural_key(path: Path) -> list[object]:
     return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", str(path))]
 
 
+def video_key_to_view_dir(video_key: str) -> str:
+    """Extract view directory name from video key.
+
+    Args:
+        video_key: Full video key path, e.g., "observation.images.hand_left"
+
+    Returns:
+        The last component of the video key, e.g., "hand_left"
+    """
+    return video_key.split(".")[-1]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Convert LeRobot v2 GR00T-format datasets to HOST episode directories."
@@ -134,14 +144,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--main-view",
         default=DEFAULT_MAIN_VIEW,
-        help=f"Source video key for the main camera, written to {MAIN_VIEW_DIR}/ "
-        f"(default: {DEFAULT_MAIN_VIEW}).",
+        help=f"Source video key for the main camera (default: {DEFAULT_MAIN_VIEW}).",
     )
     parser.add_argument(
-        "--gripper-view",
-        default=DEFAULT_GRIPPER_VIEW,
-        help=f"Source video key for the gripper camera, written to {GRIPPER_VIEW_DIR}/ "
-        f"(default: {DEFAULT_GRIPPER_VIEW}).",
+        "--gripper-views",
+        nargs="+",
+        default=list(DEFAULT_GRIPPER_VIEWS),
+        help=f"Source video keys for gripper cameras (default: {' '.join(DEFAULT_GRIPPER_VIEWS)}).",
     )
     parser.add_argument(
         "--no-gripper-view",
@@ -159,6 +168,14 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=95,
         help="JPEG quality in the range 1..100, mapped to ffmpeg -q:v (default: 95).",
+    )
+    parser.add_argument(
+        "--output-size",
+        type=int,
+        nargs=2,
+        default=None,
+        metavar=("HEIGHT", "WIDTH"),
+        help="Output image size as HEIGHT WIDTH (e.g., --output-size 224 224). If not specified, images are kept at source resolution.",
     )
     parser.add_argument(
         "--short-instructions",
@@ -310,9 +327,10 @@ def build_episodes(
     args: argparse.Namespace,
 ) -> list[Episode]:
     dataset_dirs = discover_dataset_dirs(input_dir)
-    view_specs = [(MAIN_VIEW_DIR, args.main_view)]
+    view_specs = [(video_key_to_view_dir(args.main_view), args.main_view)]
     if not args.no_gripper_view:
-        view_specs.append((GRIPPER_VIEW_DIR, args.gripper_view))
+        for gripper_view in args.gripper_views:
+            view_specs.append((video_key_to_view_dir(gripper_view), gripper_view))
     used_task_dirs: set[str] = set()
     task_dir_names: dict[tuple[str, int], str] = {}
     episodes: list[Episode] = []
@@ -457,7 +475,7 @@ def assert_images_match(path: Path, frame_count: int, shape: tuple[int, int]) ->
             raise ValueError(f"Invalid image {file}: expected {(height, width, 3)}, got {actual}")
 
 
-def encode_views(episode: Episode, jpeg_quality: int, overwrite: bool) -> None:
+def encode_views(episode: Episode, jpeg_quality: int, overwrite: bool, output_size: Optional[tuple[int, int]] = None) -> None:
     needs_write: dict[str, bool] = {}
     for view_dir, video in episode.videos.items():
         target = episode.episode_dir / view_dir
@@ -500,18 +518,24 @@ def encode_views(episode: Episode, jpeg_quality: int, overwrite: bool) -> None:
                 "-nostdin",
                 "-i",
                 str(episode.videos[view_dir]),
+            ]
+            if output_size is not None:
+                height, width = output_size
+                command.extend(["-vf", f"scale={width}:{height}"])
+            command.extend([
                 "-q:v",
                 str(jpeg_quality_to_qv(jpeg_quality)),
                 "-start_number",
                 "0",
                 str(temp_path / "%d.jpg"),
-            ]
+            ])
             completed = subprocess.run(command, capture_output=True, text=True)
             if completed.returncode != 0:
                 raise RuntimeError(
                     f"ffmpeg failed on {episode.videos[view_dir]}: {completed.stderr.strip()[-500:]}"
                 )
-            assert_images_match(temp_path, episode.frame_count, episode.view_shapes[view_dir])
+            output_shape = output_size if output_size is not None else episode.view_shapes[view_dir]
+            assert_images_match(temp_path, episode.frame_count, output_shape)
 
         for view_dir, temp_path in temporary.items():
             target = episode.episode_dir / view_dir
@@ -523,7 +547,11 @@ def encode_views(episode: Episode, jpeg_quality: int, overwrite: bool) -> None:
             if stale_video.exists():
                 stale_video.unlink()
         views = "/".join(episode.videos)
-        shapes = " ".join(f"{width}x{height}" for height, width in episode.view_shapes.values())
+        if output_size is not None:
+            output_shapes = {view_dir: output_size for view_dir in episode.videos}
+        else:
+            output_shapes = episode.view_shapes
+        shapes = " ".join(f"{width}x{height}" for height, width in output_shapes.values())
         print(
             f"[write] {episode.task_dir.name}/{episode.episode_name}: "
             f"{episode.frame_count} JPEG frames per view ({views}), {shapes}"
@@ -747,7 +775,9 @@ def write_sidecars(
     video_paths = [str(episode.episode_dir) for episode in episodes]
     write_json_atomic(output_dir / f"{dataset_id}_video_paths.json", video_paths)
 
-    view_dirs = [MAIN_VIEW_DIR] + ([] if args.no_gripper_view else [GRIPPER_VIEW_DIR])
+    view_dirs = [video_key_to_view_dir(args.main_view)]
+    if not args.no_gripper_view:
+        view_dirs.extend(video_key_to_view_dir(view) for view in args.gripper_views)
     cam_mapping = {str(episode.task_dir): view_dirs for episode in episodes}
     mapping_dir = output_dir / "cam_mapping"
     write_json_atomic(mapping_dir / f"{dataset_id}_cam_mapping.json", cam_mapping)
@@ -860,7 +890,7 @@ def verify_robot_trajectory_data(
                 raise ValueError(f"Trajectory field {key!r} in {action_file} differs from source")
 
 
-def verify_conversion(episodes: list[Episode], output_dir: Path, dataset_id: str) -> None:
+def verify_conversion(episodes: list[Episode], output_dir: Path, dataset_id: str, output_size: Optional[tuple[int, int]] = None) -> None:
     for task_dir in {episode.task_dir for episode in episodes}:
         instruction_file = task_dir / "instruction.json"
         if not instruction_file.is_file():
@@ -929,18 +959,20 @@ def main() -> int:
 
         if args.verify_only:
             require_ffmpeg()
-            verify_conversion(episodes, output_dir, args.dataset_id)
+            output_size = tuple(args.output_size) if args.output_size is not None else None
+            verify_conversion(episodes, output_dir, args.dataset_id, output_size)
             return 0
 
         require_ffmpeg()
         output_dir.mkdir(parents=True, exist_ok=True)
+        output_size = tuple(args.output_size) if args.output_size is not None else None
         for episode in episodes:
-            encode_views(episode, args.jpeg_quality, args.overwrite)
+            encode_views(episode, args.jpeg_quality, args.overwrite, output_size)
         action_mapping_file, _ = write_robot_trajectory_data(
             episodes, output_dir, args.dataset_id
         )
         write_sidecars(episodes, output_dir, args.dataset_id, args, action_mapping_file)
-        verify_conversion(episodes, output_dir, args.dataset_id)
+        verify_conversion(episodes, output_dir, args.dataset_id, output_size)
         return 0
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
