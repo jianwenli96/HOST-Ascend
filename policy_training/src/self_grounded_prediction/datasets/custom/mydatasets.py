@@ -127,6 +127,7 @@ TOKEN_TYPE_AGENT_IMAGE = 2
 
 class CustomDataset(Dataset):
     debug_count = 0
+    _printed_messages = set()
 
     def __init__(self, args: "DataArguments", tokenizer=None):
         super().__init__()
@@ -2144,7 +2145,10 @@ class CustomDataset(Dataset):
             except Exception as e:
                 continue
         
-        print(f"[DEBUG FALLBACK] No info_dtw.json, info.json, or bad_info_dtw.json found in {candidate_dirs}")
+        msg = f"[DEBUG FALLBACK] No info_dtw.json, info.json, or bad_info_dtw.json found in {candidate_dirs}"
+        if msg not in CustomDataset._printed_messages:
+            print(msg)
+            CustomDataset._printed_messages.add(msg)
         return None
 
     def check_task_video_available(self, image_tokens_path, dataset_name=None):

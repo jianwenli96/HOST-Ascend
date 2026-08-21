@@ -4,11 +4,17 @@
 
 set -euo pipefail
 
+export PYTORCH_NPU_ALLOC_CONF="${PYTORCH_NPU_ALLOC_CONF:-expandable_segments:True}"
+
+# Ensure we are in the project root directory
+cd "$(dirname "$0")/.."
+
 # ── Environment variables (from DLC / torchrun) ─────────────────────────────
 WORLD_SIZE=${WORLD_SIZE:-1}
 RANK=${RANK:-0}
 MASTER_ADDR=${MASTER_ADDR:-127.0.0.1}
 MASTER_PORT=${MASTER_PORT:-59013}
+
 if [ -n "${ASCEND_RT_VISIBLE_DEVICES:-}" ]; then
     NGPUS=$(echo $ASCEND_RT_VISIBLE_DEVICES | tr ',' '\n' | wc -l)
 elif command -v npu-smi &> /dev/null; then
@@ -25,7 +31,7 @@ fi
 EXTRA_ARGS=("$@")
 
 # ── Task basename ────────────────────────────────────────────────────────────
-TASK_BASENAME="real_joint_2cam_224_1e-4_pac_headwise_ncp_ve"
+TASK_BASENAME="human_and_robot_policy"
 for ((i = 0; i < ${#EXTRA_ARGS[@]}; i++)); do
   arg="${EXTRA_ARGS[$i]}"
   case "${arg}" in
@@ -37,7 +43,20 @@ for ((i = 0; i < ${#EXTRA_ARGS[@]}; i++)); do
   esac
 done
 # Append suffix to distinguish runs in logs and wandb
-TASK_SUFFIX="pac_hw_ncp_ve"
+TASK_SUFFIX="base"
+FILTERED_ARGS=()
+for ((i = 0; i < ${#EXTRA_ARGS[@]}; i++)); do
+  arg="${EXTRA_ARGS[$i]}"
+  case "${arg}" in
+    task_suffix=*)
+      TASK_SUFFIX="${arg#task_suffix=}"
+      ;;
+    *)
+      FILTERED_ARGS+=("$arg")
+      ;;
+  esac
+done
+EXTRA_ARGS=("${FILTERED_ARGS[@]}")
 TASK_FULLNAME="${TASK_BASENAME}_${TASK_SUFFIX}"
 
 # ── TIMESTAMP sync (coordinator filename for cross-DLC rendezvous) ──────────
@@ -150,7 +169,7 @@ fi
 
 # ── Launch ───────────────────────────────────────────────────────────────────
 accelerate launch \
-  --config_file scripts/accelerate_configs/accelerate_zero3_ds.yaml \
+  --config_file scripts/accelerate_configs/accelerate_zero1_ds.yaml \
   --num_processes "${TOTAL_PROCESSES}" \
   --num_machines "${WORLD_SIZE}" \
   --machine_rank "${RANK}" \
