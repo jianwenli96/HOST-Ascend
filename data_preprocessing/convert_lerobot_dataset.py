@@ -41,6 +41,7 @@ import argparse
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -177,20 +178,82 @@ def process_task(
     output_size: Optional[tuple[int, int]],
     accumulator: NormAccumulator,
     dataset_writer: DatasetWriter,
+    *,
+    commit_lock: Optional[threading.Lock] = None,
 ) -> None:
-    """Run every stage for one task unit: encode -> trajectory -> sidecars -> verify."""
+    """Run every stage for one task unit.
+
+    Phase A (encode -> per-episode trajectory -> sidecars -> verify) only
+    touches this task's own episode directories, so it is idempotent and safe
+    to re-run after a crash.  Phase B (the commit: normalization statistics,
+    the joint/action mapping, and the dataset-level sidecars) mutates shared
+    dataset state; when ``commit_lock`` is given (streaming runs with parallel
+    converters), it serializes that section across callers.
+    """
+    # Phase A: per-task outputs, retry-safe.
     encode_task(unit.episodes, args.jpeg_quality, args.overwrite, output_size, args.workers)
+    trajectories = []
     for episode in unit.episodes:
         trajectory = load_trajectory(episode.source)
         write_episode_trajectory(episode, trajectory)
-        accumulator.update(trajectory)
-    write_norm_mapping(output_dir, args.dataset_id, accumulator.finalize())
+        trajectories.append(trajectory)
     episode_dirs = [str(episode.episode_dir) for episode in unit.episodes]
     for index, episode in enumerate(unit.episodes):
         write_episode_sidecars(episode, episode_dirs, index)
     write_task_sidecars(unit)
-    dataset_writer.add_task(unit)
-    verify_task(unit, output_size)
+    verify_task(unit, output_size)  # acceptance gate: commit only verified output
+
+    # Phase B: shared dataset-level commit.
+    def commit() -> None:
+        for trajectory in trajectories:
+            accumulator.update(trajectory)
+        write_norm_mapping(output_dir, args.dataset_id, accumulator.finalize())
+        dataset_writer.add_task(unit)
+
+    if commit_lock is None:
+        commit()
+    else:
+        with commit_lock:
+            commit()
+
+
+def run_conversion(
+    input_dir: Path,
+    output_dir: Path,
+    args: argparse.Namespace,
+    *,
+    dataset_writer: Optional[DatasetWriter] = None,
+    accumulator: Optional[NormAccumulator] = None,
+    commit_lock: Optional[threading.Lock] = None,
+) -> list[Episode]:
+    """Convert every dataset under ``input_dir`` into ``output_dir``.
+
+    The plain CLI passes one root and lets this create fresh shared instances;
+    the streaming pipeline (``obs_streaming_convert.py``) calls this once per
+    extracted tar root with its own rebuilt writer/accumulator so all tars
+    contribute to one dataset-id, and passes ``commit_lock`` when it runs more
+    than one converter in parallel.
+    """
+    output_size = tuple(args.output_size) if args.output_size is not None else None
+    if dataset_writer is None:
+        dataset_writer = DatasetWriter(
+            output_dir, args.dataset_id, args, norm_mapping_path(output_dir, args.dataset_id)
+        )
+    if accumulator is None:
+        accumulator = NormAccumulator()
+    episodes: list[Episode] = []
+    for unit in iter_task_units(input_dir, output_dir, args):
+        process_task(
+            unit,
+            args,
+            output_dir,
+            output_size,
+            accumulator,
+            dataset_writer,
+            commit_lock=commit_lock,
+        )
+        episodes.extend(unit.episodes)
+    return episodes
 
 
 def main() -> int:
@@ -200,9 +263,9 @@ def main() -> int:
     try:
         require_ffmpeg()
         output_size = tuple(args.output_size) if args.output_size is not None else None
-        episodes: list[Episode] = []
 
         if args.verify_only:
+            episodes: list[Episode] = []
             for unit in iter_task_units(input_dir, output_dir, args):
                 verify_task(unit, output_size)
                 episodes.extend(unit.episodes)
@@ -216,9 +279,9 @@ def main() -> int:
         dataset_writer = DatasetWriter(
             output_dir, args.dataset_id, args, norm_mapping_path(output_dir, args.dataset_id)
         )
-        for unit in iter_task_units(input_dir, output_dir, args):
-            process_task(unit, args, output_dir, output_size, accumulator, dataset_writer)
-            episodes.extend(unit.episodes)
+        episodes = run_conversion(
+            input_dir, output_dir, args, dataset_writer=dataset_writer, accumulator=accumulator
+        )
         if not episodes:
             raise ValueError("No episodes discovered")
         verify_dataset(episodes, output_dir, args.dataset_id)

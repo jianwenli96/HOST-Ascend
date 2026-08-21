@@ -85,9 +85,56 @@ class DatasetWriter:
         self.task_counts: dict[str, int] = {}
         self.cam_mapping: dict[str, list[str]] = {}
         self.episode_records: list[dict] = []
+        self._seen_episode_dirs: set[str] = set()
+
+    @classmethod
+    def from_manifest(
+        cls, output_dir: Path, dataset_id: str, args, mapping_file: Path
+    ) -> "DatasetWriter":
+        """Rebuild the writer from a previous run's conversion_manifest.json.
+
+        ``_rewrite`` writes the manifest last of the three dataset-level files,
+        so it acts as the commit marker: after a crash anywhere in an
+        ``add_task``, the next add_task regenerates video_paths/cam_mapping
+        from the manifest state.  Used by the streaming pipeline to resume
+        into an output directory whose source files have been deleted.
+        """
+        manifest_path = output_dir / "conversion_manifest.json"
+        if not manifest_path.is_file():
+            raise ValueError(
+                f"Cannot resume into {output_dir}: conversion_manifest.json is missing. "
+                "Use a fresh output directory, or restore the manifest from a backup."
+            )
+        with manifest_path.open("r", encoding="utf-8") as file:
+            manifest = json.load(file)
+        if manifest.get("dataset_id") != dataset_id:
+            raise ValueError(
+                f"{manifest_path} belongs to dataset {manifest.get('dataset_id')!r}, "
+                f"not {dataset_id!r}; refusing to mix datasets in one directory"
+            )
+        writer = cls(output_dir, dataset_id, args, mapping_file)
+        records = list(manifest.get("episodes", []))
+        writer.view_dirs = list(manifest.get("output_views") or writer.view_dirs)
+        writer.video_paths = [record["episode_dir"] for record in records]
+        writer.task_counts = dict(manifest.get("tasks", {}))
+        writer.cam_mapping = {record["task_dir"]: writer.view_dirs for record in records}
+        writer.episode_records = records
+        writer._seen_episode_dirs = {record["episode_dir"] for record in records}
+        return writer
 
     def add_task(self, unit: TaskUnit) -> None:
-        self.video_paths.extend(str(episode.episode_dir) for episode in unit.episodes)
+        # Idempotent: a retry of a task whose previous add_task committed but
+        # whose state mark was lost (crash between the two) must not duplicate
+        # episodes in video_paths.json / the manifest.
+        new_episode_dirs = [
+            str(episode.episode_dir)
+            for episode in unit.episodes
+            if str(episode.episode_dir) not in self._seen_episode_dirs
+        ]
+        if not new_episode_dirs:
+            return
+        self._seen_episode_dirs.update(new_episode_dirs)
+        self.video_paths.extend(new_episode_dirs)
         self.task_counts[unit.task_dir.name] = len(unit.episodes)
         self.cam_mapping[str(unit.task_dir)] = self.view_dirs
         for episode in unit.episodes:
@@ -210,4 +257,69 @@ def verify_dataset(episodes: list[Episode], output_dir: Path, dataset_id: str) -
         f"Verified {len(episodes)} robot episodes across {len(expected_tasks)} tasks, "
         f"including 14D bimanual actions, 14D proprioception, and {len(expected_views)} "
         f"camera view(s)."
+    )
+
+
+def verify_dataset_artifacts(
+    output_dir: Path, dataset_id: str, verify_episode_trajectories: bool = False
+) -> None:
+    """Source-free consistency check for streaming runs.
+
+    ``verify_dataset`` above needs the source Parquet files, which a streaming
+    run deletes after each tar commits; per-task acceptance is already done by
+    ``verify_task`` at commit time.  This check instead verifies the
+    dataset-level artifacts against each other and against the files on disk
+    (existence always; per-frame trajectory JSON contents only when
+    ``verify_episode_trajectories`` is set, since that re-parses every episode
+    JSON of the dataset).
+    """
+    manifest_path = output_dir / "conversion_manifest.json"
+    if not manifest_path.is_file():
+        raise ValueError(f"Missing required sidecar: {manifest_path}")
+    with manifest_path.open("r", encoding="utf-8") as file:
+        manifest = json.load(file)
+    if manifest.get("dataset_id") != dataset_id:
+        raise ValueError(f"Unexpected dataset id in {manifest_path}: {manifest.get('dataset_id')!r}")
+    records = list(manifest.get("episodes", []))
+    episode_dirs = [record["episode_dir"] for record in records]
+    if len(episode_dirs) != len(set(episode_dirs)):
+        raise ValueError(f"Duplicate episode entries in {manifest_path}")
+
+    video_paths_file = output_dir / f"{dataset_id}_video_paths.json"
+    with video_paths_file.open("r", encoding="utf-8") as file:
+        video_paths = json.load(file)
+    if sorted(video_paths) != sorted(episode_dirs):
+        raise ValueError(f"Contents of {video_paths_file} diverged from {manifest_path}")
+
+    cam_mapping_file = output_dir / "cam_mapping" / f"{dataset_id}_cam_mapping.json"
+    with cam_mapping_file.open("r", encoding="utf-8") as file:
+        cam_mapping = json.load(file)
+    expected_tasks = {record["task_dir"] for record in records}
+    expected_views = list(manifest.get("output_views", []))
+    if set(cam_mapping) != expected_tasks or any(
+        views != expected_views for views in cam_mapping.values()
+    ):
+        raise ValueError(f"Contents of {cam_mapping_file} diverged from {manifest_path}")
+
+    for record in records:
+        episode_dir = Path(record["episode_dir"])
+        for filename in ("instruction.txt", "task_paths.json", "task_paths_eval.json"):
+            if not (episode_dir / filename).is_file():
+                raise ValueError(f"Missing required sidecar: {episode_dir / filename}")
+        trajectory_file = episode_dir / f"{record['episode']}.json"
+        if not trajectory_file.is_file():
+            raise ValueError(f"Missing required sidecar: {trajectory_file}")
+        if verify_episode_trajectories:
+            with trajectory_file.open("r", encoding="utf-8") as file:
+                entries = json.load(file).get("data")
+            if not isinstance(entries, list) or len(entries) != record["frame_count"]:
+                actual_count = None if not isinstance(entries, list) else len(entries)
+                raise ValueError(
+                    f"Invalid action count in {trajectory_file}: expected "
+                    f"{record['frame_count']}, got {actual_count}"
+                )
+
+    print(
+        f"Verified dataset artifacts for {len(episode_dirs)} robot episodes across "
+        f"{len(expected_tasks)} tasks ({dataset_id})."
     )

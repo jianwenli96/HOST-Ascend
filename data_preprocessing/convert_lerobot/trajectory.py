@@ -156,6 +156,37 @@ class NormAccumulator:
             }
         return result
 
+    def stats_snapshot(self) -> dict[str, dict[str, list[float]]]:
+        """Export the running min/max as a JSON-able snapshot.
+
+        The streaming pipeline stores one snapshot per converted tar so a
+        resumed run can rebuild the accumulator without re-reading sources
+        (they are deleted after each tar commits).
+        """
+        return {
+            "min": {key: values.tolist() for key, values in self._min.items()},
+            "max": {key: values.tolist() for key, values in self._max.items()},
+        }
+
+    def merge_stats(self, snapshots: list[dict[str, dict[str, list[float]]]]) -> None:
+        """Fold stats_snapshot() dicts into this accumulator.
+
+        min/max is exact and order-independent, so merging per-tar snapshots
+        reproduces the live accumulation bit-for-bit (float64 lists survive
+        the JSON round-trip exactly).
+        """
+        for snapshot in snapshots:
+            for key, values in snapshot.get("min", {}).items():
+                current_min = np.asarray(values, dtype=np.float64)
+                self._min[key] = (
+                    current_min if key not in self._min else np.minimum(self._min[key], current_min)
+                )
+            for key, values in snapshot.get("max", {}).items():
+                current_max = np.asarray(values, dtype=np.float64)
+                self._max[key] = (
+                    current_max if key not in self._max else np.maximum(self._max[key], current_max)
+                )
+
 
 def norm_mapping_path(output_dir: Path, dataset_id: str) -> Path:
     return output_dir / "joint_action_mapping" / f"{dataset_id}_joint_action_mapping.json"

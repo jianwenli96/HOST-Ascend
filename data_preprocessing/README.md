@@ -123,6 +123,62 @@ the stored episode paths stay absolute). Launch alignment with the same env vars
 `policy_training/` add the dataset id to the data config and note the action dimensionality is
 14 (20 after 6D-rotation expansion) with 14D proprioception (see §2.5).
 
+### 1.3. Streaming OBS ingestion
+
+`obs_streaming_convert.py` (package: `obs_ingest/`) downloads `task_XXX.tar.gz` objects from a
+Huawei OBS bucket and feeds them through the §1.2 converter *as they arrive* — no need to mirror
+everything locally first. All tars merge into one dataset-id. It targets large corpora (e.g. the
+AgiBot Beta LeRobot tars: 183 objects, ~9 TB):
+
+* **Pipelined stages** — download / extract / convert overlap (bounded queues): tar N converts
+  while N+1 extracts and N+2 downloads.
+* **Parallel ranged downloads** — each tar is fetched as `--parts-per-tar` Range GETs written
+  with `os.pwrite` into one preallocated sparse file; per-part markers survive restarts, so a
+  re-run resumes at byte granularity (the OBS SDK only retries connection *opening*, mid-stream
+  deaths are reconnected here — see `obs_ingest/obsio.py`).
+* **View spec probing** — the smallest few tars' `meta/info.json` are streamed (videos never
+  fetched) to pick the run-level views: when every probe ships the `*_compress` 224×224 h264
+  views they are used (≈10× cheaper than decoding the 480×640 AV1 originals); otherwise the
+  full-resolution keys plus `--output-size` apply. Explicit `--main-view`/`--gripper-views`
+  flags skip probing. The spec is stored in the pipeline state and reused on resume.
+* **Crash-consistent resume** — per-tar state machine in `<staging>/obs_pipeline_state.json`
+  (atomic writes; converted ⇒ committed + norm stats saved in one write). On resume the shared
+  `DatasetWriter` is rebuilt from `conversion_manifest.json` (the commit marker) and the norm
+  accumulator from the per-tar stats snapshots; `DatasetWriter.add_task` is idempotent, so
+  crash-window retries cannot duplicate episodes.
+* **Bounded staging disk** — `--max-staging-gb` backpressures the downloaders (one tar may
+  overshoot the cap); staging files are deleted after each tar commits (`--keep-extracted` to
+  keep them).
+* **Failure taxonomy** — transient (network, gzip CRC → re-download) vs permanent (4xx, bad
+  layout, missing views, `min_frames`/norm violations), each with `--retries` bounded and
+  persisted; failed tars are listed at the end and retried with `--force-retry-failed`.
+
+```bash
+# environment: host_alignment conda env (pyarrow/numpy/ffmpeg) + obs SDK
+#   (pip install esdk-obs-python, or --obs-sdk-path pointing at its src dir)
+python data_preprocessing/obs_streaming_convert.py \
+  --config obs_infos.txt \                       # OBS_AK/OBS_SK/OBS_ENDPOINT/OBS_BUCKET
+  --prefix Agibot_Beta_Lerobot_Amap/ \
+  --output-dir /path/to/align_data \
+  --dataset-id AgibotA2D
+
+python data_preprocessing/obs_streaming_convert.py --list-only    # inspect the objects
+python data_preprocessing/obs_streaming_convert.py --status       # per-tar state table
+python data_preprocessing/obs_streaming_convert.py --limit 1      # trial (smallest tar)
+```
+
+Useful knobs: `--download-workers 2` / `--extract-workers 2` / `--convert-workers 1` /
+`--parts-per-tar 8` / `--max-staging-gb 200` / `--retries 3` / `--timeout 120` /
+`--probe-tars 3`. Converter flags pass through unchanged (`--workers`, `--min-frames`,
+`--jpeg-quality`, `--output-size`, `--short-instructions`, `--overwrite`); `--max-episodes`
+is a **global** cap across all tars. Verification is per tar (`verify_task` at commit) plus a
+source-free end-of-run check of the dataset artifacts (`--skip-final-verify` to skip); the
+full `verify_dataset` that reads source Parquets is not available because sources are deleted
+after each commit. After the run, feed the output into the §1 grouping pipeline
+(`build_task_dictionary.py` + `write_task_paths.py`) as usual. Synthetic tests (part-download
+resume, extraction safety, state machine, writer rebuild): `python
+data_preprocessing/test_obs_ingest.py`.
+
 ## 2. Dataset format
 
 `policy_training/` (self-grounded prediction) and `alignment/` (target coupling) consume the
