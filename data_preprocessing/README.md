@@ -78,6 +78,51 @@ VIDEO_PATHS=/path/to/HumanAndRobot/align_data/HumanAndRobot_video_paths.json \
 bash alignment/train_scripts/run_ds.sh
 ```
 
+### 1.2. LeRobot v2 conversion
+
+`convert_lerobot_dataset.py` handles LeRobot v2.1 datasets in the GR00T convention
+(`meta/info.json` reports `codebase_version: "v2.1"`, e.g. the AgiBot A2D bimanual robot):
+per-episode Parquet files under `data/chunk-*/episode_XXXXXX.parquet`, per-view MP4 videos under
+`videos/chunk-*/<video_key>/episode_XXXXXX.mp4`, and optional `meta/tasks.jsonl` task
+instructions. It is the robot-only counterpart of §1.1 — there is no synchronized human video,
+so each episode emits a single episode directory and its `task_paths.json` lists same-task
+*robot* episodes (a deterministic same-task peer goes in `task_paths_eval.json`).
+
+Each episode receives a 14D bimanual action trajectory built from `actions.end.position` (3+3
+XYZ positions, metres), `actions.end.orientation` (4+4 xyzw quaternions converted to HOST
+`[roll, pitch, yaw]` Euler triples, radians), and `actions.effector.position` (2 gripper
+commands, 0=closed 1=open), plus 14D proprioception from `observation.states.joint.position`
+(7+7 joint angles, radians). Columns that do not map to the HOST convention (waist, head, robot
+base, velocities, `actions.joint.position`) are excluded and listed in the manifest. Source
+videos are AV1-coded, so frames are extracted with the `ffmpeg` CLI (required on the machine
+running the converter) and stored as JPEG image sequences.
+
+```bash
+python data_preprocessing/convert_lerobot_dataset.py \
+  --input-dir robot_datasets \        # a dataset dir, or a root containing several
+  --output-dir ./output/align_data \
+  --dataset-id RobotTask
+```
+
+`--main-view`/`--gripper-views` select which source video keys become `images/` and
+`gripper_images/` (defaults: `observation.images.head` / `observation.images.hand_left`);
+`--no-gripper-view` emits a single-view dataset. `--short-instructions` writes only the task
+text before the first `|` to `instruction.txt`; `--max-episodes` bounds a partial run;
+`--verify-only` validates an existing conversion against the source files.
+
+The converter processes one task at a time (task-by-task discovery, so tasks may stream in
+over time) and encodes the episodes of each task in parallel: `--workers` sets the number of
+parallel episode encodes (default `min(4, cpu count)`).
+
+The output mirrors §1.1: `<dataset_id>_video_paths.json`, `cam_mapping/`, per-episode
+`task_paths.json`/`task_paths_eval.json`/`instruction.txt`, trajectory JSON files,
+`joint_action_mapping/`, and `conversion_manifest.json`. Each task directory also receives the
+session-level `instruction.json` that `build_task_dictionary.py` reads, so the converted output
+can be fed straight into the §1 grouping pipeline (pass `--input_dir` as an absolute path so
+the stored episode paths stay absolute). Launch alignment with the same env vars as §1.1; for
+`policy_training/` add the dataset id to the data config and note the action dimensionality is
+14 (20 after 6D-rotation expansion) with 14D proprioception (see §2.5).
+
 ## 2. Dataset format
 
 `policy_training/` (self-grounded prediction) and `alignment/` (target coupling) consume the
